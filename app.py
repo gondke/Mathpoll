@@ -29,26 +29,18 @@ st.markdown(
         padding: 25px;
         margin-bottom: 20px;
     }
-    .student-card {
-        background-color: #1F2937;
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid #374151;
-    }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # ==========================================
-# 2. SQLITE DATABASE ENGINE
+# 2. SQLITE DATABASE ENGINE & SESSION SYNC
 # ==========================================
 DB_FILE = "quiz_system.db"
 
-
 def get_db_connection():
   return sqlite3.connect(DB_FILE, check_same_thread=False)
-
 
 def init_db():
   with get_db_connection() as conn:
@@ -62,6 +54,11 @@ def init_db():
                     class_id INTEGER,
                     roll_no TEXT NOT NULL,
                     name TEXT NOT NULL,
+                    FOREIGN KEY(class_id) REFERENCES classrooms(id)
+                )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS active_sessions (
+                    session_code TEXT PRIMARY KEY,
+                    class_id INTEGER,
                     FOREIGN KEY(class_id) REFERENCES classrooms(id)
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS student_groups (
@@ -80,7 +77,6 @@ def init_db():
                     correct_idx INTEGER NOT NULL
                 )""")
     conn.commit()
-
 
 init_db()
 
@@ -109,53 +105,62 @@ if "current_q_idx" not in st.session_state:
 if "quiz_ended" not in st.session_state:
   st.session_state.quiz_ended = False
 
+# Helper: Check session code in Database
+def validate_session_code(code):
+  clean_code = code.strip().upper()
+  with get_db_connection() as conn:
+    c = conn.cursor()
+    c.execute("SELECT class_id FROM active_sessions WHERE session_code = ?", (clean_code,))
+    row = c.fetchone()
+    if row:
+      return row[0]  # Returns active class_id
+  return None
+
 # ==========================================
-# 4. ENTRY / LOGIN SCREEN
+# 4. ENTRY / LOGIN SCREEN (STUDENT & TEACHER)
 # ==========================================
 if st.session_state.user_role is None:
   st.title("🧪 STEM Live Quiz Portal")
-  col_login, _ = st.columns([1, 1])
+  col_login, _ = st.columns([1.2, 1])
 
   with col_login:
     st.markdown("### Join Session")
     input_code = st.text_input(
         "Enter Session Code:", placeholder="e.g. A1B2C3"
-    ).upper()
+    ).strip().upper()
 
     if input_code:
-      if input_code == st.session_state.quiz_code:
-        # Fetch active class students
-        if st.session_state.active_class_id:
-          with get_db_connection() as conn:
-            students_df = pd.read_sql(
-                "SELECT roll_no, name FROM students WHERE class_id = ?",
-                conn,
-                params=(st.session_state.active_class_id,),
-            )
-
-          if not students_df.empty:
-            student_options = (
-                students_df["roll_no"] + " - " + students_df["name"]
-            ).tolist()
-            selected_student = st.selectbox(
-                "Select Your Roll Number:", student_options
-            )
-            selected_roll = selected_student.split(" - ")[0]
-
-            if st.button("Join Class Quiz 🚀"):
-              st.session_state.student_roll = selected_roll
-              st.session_state.user_role = "student"
-              st.rerun()
-          else:
-            st.error(
-                "No enrolled students found for the active class session."
-            )
-        else:
-          st.error(
-              "Instructor has not set an active classroom for this session yet."
+      # Check against Database instead of local session state
+      matched_class_id = validate_session_code(input_code)
+      
+      if matched_class_id or (input_code == st.session_state.quiz_code and st.session_state.active_class_id):
+        target_class_id = matched_class_id if matched_class_id else st.session_state.active_class_id
+        st.session_state.active_class_id = target_class_id
+        
+        with get_db_connection() as conn:
+          students_df = pd.read_sql(
+              "SELECT roll_no, name FROM students WHERE class_id = ?",
+              conn,
+              params=(target_class_id,),
           )
+
+        if not students_df.empty:
+          student_options = (
+              students_df["roll_no"] + " - " + students_df["name"]
+          ).tolist()
+          selected_student = st.selectbox(
+              "Select Your Roll Number:", student_options
+          )
+          selected_roll = selected_student.split(" - ")[0]
+
+          if st.button("Join Class Quiz 🚀", use_container_width=True):
+            st.session_state.student_roll = selected_roll
+            st.session_state.user_role = "student"
+            st.rerun()
+        else:
+          st.error("No enrolled students found for this session's class.")
       else:
-        st.error("Invalid Session Code. Please check and try again.")
+        st.error("Invalid Session Code. Ensure the teacher has selected an active class.")
 
     st.markdown("---")
     with st.expander("Teacher / Host Access"):
@@ -169,7 +174,16 @@ if st.session_state.user_role is None:
 elif st.session_state.user_role == "student":
   st.title("📲 Student Quiz Interface")
 
-  # Find assigned group
+  # Sync active groups from DB for the class
+  with get_db_connection() as conn:
+    grps_df = pd.read_sql(
+        "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?",
+        conn,
+        params=(st.session_state.active_class_id,),
+    )
+    if not grps_df.empty:
+      st.session_state.groups = grps_df.groupby("group_name")["roll_no"].apply(list).to_dict()
+
   assigned_group = "Unassigned"
   for grp, members in st.session_state.groups.items():
     if st.session_state.student_roll in members:
@@ -180,11 +194,8 @@ elif st.session_state.user_role == "student":
   col_info1.info(f"**Roll Number:** {st.session_state.student_roll}")
   col_info2.success(f"**Group:** {assigned_group}")
 
-  if (
-      not st.session_state.quiz_questions
-      or st.session_state.current_q_idx >= len(st.session_state.quiz_questions)
-  ):
-    st.warning("Waiting for the teacher to display a question...")
+  if not st.session_state.quiz_questions or st.session_state.current_q_idx >= len(st.session_state.quiz_questions):
+    st.warning("Waiting for the teacher to broadcast questions...")
   elif st.session_state.quiz_ended:
     st.balloons()
     st.success("🎉 Quiz Completed! Please wait for the teacher to announce results.")
@@ -214,21 +225,12 @@ elif st.session_state.user_role == "student":
 
     if st.button("Submit Poll Answer 🚀", use_container_width=True):
       if assigned_group == "Unassigned":
-        st.error(
-            "You are not assigned to a group yet. Ask your instructor to form"
-            " groups."
-        )
+        st.error("You are not assigned to a group yet. Contact your instructor.")
       else:
-        # Update or record response
         st.session_state.responses = [
-            r
-            for r in st.session_state.responses
-            if not (
-                r["Q_Idx"] == st.session_state.current_q_idx
-                and r["Roll_No"] == st.session_state.student_roll
-            )
+            r for r in st.session_state.responses
+            if not (r["Q_Idx"] == st.session_state.current_q_idx and r["Roll_No"] == st.session_state.student_roll)
         ]
-
         st.session_state.responses.append({
             "Q_Idx": st.session_state.current_q_idx,
             "Roll_No": st.session_state.student_roll,
@@ -249,6 +251,16 @@ elif st.session_state.user_role == "student":
 # ==========================================
 elif st.session_state.user_role == "teacher":
   st.sidebar.title("⚛️ Teacher Dashboard")
+
+  # Register code in Database whenever active class is set
+  if st.session_state.active_class_id:
+    with get_db_connection() as conn:
+      conn.execute(
+          "INSERT OR REPLACE INTO active_sessions (session_code, class_id) VALUES (?, ?)",
+          (st.session_state.quiz_code, st.session_state.active_class_id),
+      )
+      conn.commit()
+
   st.sidebar.markdown(
       f"""
     <div style="background-color: #1F2937; border: 2px solid #3B82F6; border-radius: 12px; padding: 16px; text-align: center;">
@@ -262,16 +274,6 @@ elif st.session_state.user_role == "teacher":
   if st.sidebar.button("Logout Dashboard"):
     st.session_state.user_role = None
     st.rerun()
-
-  chart_type = st.sidebar.selectbox(
-      "Select Chart",
-      [
-          "Individual Group Histograms",
-          "Overall Bar Chart",
-          "Overall Pie Chart",
-          "Group Stacked Bar Chart",
-      ],
-  )
 
   st.title("🧪 STEM Live Quiz & Classroom Manager")
 
@@ -311,14 +313,20 @@ elif st.session_state.user_role == "teacher":
           ].iloc[0]
           st.session_state.active_class_id = int(selected_class_row["id"])
 
+          # Publish Session Code to DB
+          conn.execute(
+              "INSERT OR REPLACE INTO active_sessions (session_code, class_id) VALUES (?, ?)",
+              (st.session_state.quiz_code, st.session_state.active_class_id),
+          )
+          conn.commit()
+
           st.markdown("---")
           st.subheader("2. Add Students")
           s_roll = st.text_input("Roll Number:")
           s_name = st.text_input("Student Name:")
           if st.button("Add Student"):
             conn.execute(
-                "INSERT INTO students (class_id, roll_no, name) VALUES (?, ?,"
-                " ?)",
+                "INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)",
                 (st.session_state.active_class_id, s_roll, s_name),
             )
             conn.commit()
@@ -375,8 +383,7 @@ elif st.session_state.user_role == "teacher":
 
         if st.button("Save Question 💾"):
           conn.execute(
-              "INSERT INTO question_bank (topic, question, option_labels,"
-              " options, correct_idx) VALUES (?, ?, ?, ?, ?)",
+              "INSERT INTO question_bank (topic, question, option_labels, options, correct_idx) VALUES (?, ?, ?, ?, ?)",
               (
                   q_topic,
                   q_text,
@@ -425,18 +432,11 @@ elif st.session_state.user_role == "teacher":
 
       col_nav1, col_nav2, col_nav3 = st.columns(3)
       with col_nav1:
-        if (
-            st.button("⬅️ Previous Question")
-            and st.session_state.current_q_idx > 0
-        ):
+        if st.button("⬅️ Previous Question") and st.session_state.current_q_idx > 0:
           st.session_state.current_q_idx -= 1
           st.rerun()
       with col_nav2:
-        if st.button(
-            "Next Question ➡️"
-        ) and st.session_state.current_q_idx < len(
-            st.session_state.quiz_questions
-        ) - 1:
+        if st.button("Next Question ➡️") and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
           st.session_state.current_q_idx += 1
           st.rerun()
       with col_nav3:
