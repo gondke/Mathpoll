@@ -127,12 +127,24 @@ def init_db():
         """))
         s.commit()
 
-# Safe DB initialization wrapper
+# ==========================================
+# DIAGNOSTIC DB INITIALIZATION
+# ==========================================
 try:
     init_db()
 except Exception as e:
-    st.error("⚠️ Unable to connect to the database. Please check your credentials in secrets.toml and network connection.")
-    st.sidebar.error("Database Connection Failed")
+    st.error("❌ Database Connection Failed!")
+    st.subheader("Error Details:")
+    st.code(str(e), language="python")
+    
+    st.markdown("---")
+    st.subheader("🛠️ Immediate Steps Based on Error Output:")
+    st.markdown("""
+    * **`ModuleNotFoundError: No module named 'psycopg2'`**: Add `psycopg2-binary` to your `requirements.txt`.
+    * **`password authentication failed`**: Double-check your Supabase password in Secrets (ensure no typos/unmatched quotes).
+    * **`Could not translate host name` or `Timeout`**: Check your pooler host address in **Supabase Dashboard $\rightarrow$ Settings $\rightarrow$ Database $\rightarrow$ Connection Pooling**.
+    * **`Tenant or user not found`**: Ensure your username has the suffix (e.g., `postgres.your_project_ref`).
+    """)
     st.stop()
 
 # ==========================================
