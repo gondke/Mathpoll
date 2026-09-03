@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import random
 import string
 
 # ==========================================
-# 1. PAGE CONFIGURATION & STYLING (Dark / High Contrast)
+# 1. PAGE CONFIGURATION & STYLING
 # ==========================================
 st.set_page_config(
     page_title="MathPhys Chem Real-Time Polling",
@@ -24,7 +23,7 @@ st.markdown("""
         color: #FFFFFF;
     }
     
-    /* High contrast cards */
+    /* High contrast card metric */
     .metric-card {
         background-color: #1F2937;
         border: 2px solid #3B82F6;
@@ -34,11 +33,12 @@ st.markdown("""
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     }
     
-    .question-box {
+    /* Target Streamlit's container element to style it as the Question Box */
+    [data-testid="stVerticalBlock"] > div:has(div.question-marker) {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 2px solid #818CF8;
         border-radius: 15px;
-        padding: 24px;
+        padding: 20px;
         margin-bottom: 20px;
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
     }
@@ -152,15 +152,11 @@ with st.expander("📝 Question & LaTeX Editor", expanded=False):
         st.session_state.options[2] = st.text_input("Option C", value=st.session_state.options[2])
         st.session_state.options[3] = st.text_input("Option D", value=st.session_state.options[3])
 
-# Question Display Card (Renders raw LaTeX & Matrices directly inside the box)
-st.markdown(f"""
-<div class="question-box">
-    <h3 style="color:#F3F4F6; margin-top:0;">Current Question:</h3>
-    <div style="font-size: 1.25em; color: #E0E7FF;">
-        {st.session_state.question}
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Question Box - Native Streamlit Container enables KaTeX parsing inside styled card
+with st.container():
+    st.markdown('<div class="question-marker"></div>', unsafe_allow_html=True)
+    st.markdown("### Current Question:")
+    st.markdown(st.session_state.question)
 
 # Main Grid Layout: Student Portal (Left) | Live Analytics (Right)
 col_student, col_analytics = st.columns([1, 1.2])
