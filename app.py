@@ -72,15 +72,15 @@ if "groups" not in st.session_state:
 if "responses" not in st.session_state:
     st.session_state.responses = []
 
-# Default question using standard LaTeX syntax
+# Default Linear Algebra / Physics question with LaTeX Matrix
 if "question" not in st.session_state:
-    st.session_state.question = r"Solve the Schrödinger Equation eigenvalue problem for $\psi(x)$ where $\hat{H} = -\frac{\hbar^2}{2m}\nabla^2 + V(x)$:"
+    st.session_state.question = r"Eigenvalues of the matrix $$A = \begin{bmatrix} 2 & 2 \\ 0 & 3 \end{bmatrix}$$ are:"
 if "options" not in st.session_state:
     st.session_state.options = [
-        r"$E \psi(x)$",
-        r"$\frac{d}{dx}\psi(x)$",
-        r"$\int_0^\infty \psi(x) dx$",
-        r"$\hbar \omega$"
+        r"$\lambda_1 = 2, \lambda_2 = 3$",
+        r"$\lambda_1 = 0, \lambda_2 = 2$",
+        r"$\lambda_1 = 1, \lambda_2 = 3$",
+        r"$\lambda_1 = -2, \lambda_2 = -3$"
     ]
 
 # ==========================================
@@ -143,7 +143,7 @@ st.title("🧪 STEM Live Real-Time Polling System")
 
 # TeX Question Editor
 with st.expander("📝 Question & LaTeX Editor", expanded=False):
-    st.session_state.question = st.text_input("Enter Question (LaTeX supported via $...$ or $$\\dots$$):", value=st.session_state.question)
+    st.session_state.question = st.text_input("Enter Question (Use $...$ for inline or $$\\dots$$ for block LaTeX):", value=st.session_state.question)
     col_a, col_b = st.columns(2)
     with col_a:
         st.session_state.options[0] = st.text_input("Option A", value=st.session_state.options[0])
@@ -152,9 +152,15 @@ with st.expander("📝 Question & LaTeX Editor", expanded=False):
         st.session_state.options[2] = st.text_input("Option C", value=st.session_state.options[2])
         st.session_state.options[3] = st.text_input("Option D", value=st.session_state.options[3])
 
-# Question Display Card (Renders raw LaTeX as mathematical formulas)
-st.markdown('<div class="question-box"><h3 style="color:#F3F4F6; margin-top:0;">Current Question:</h3></div>', unsafe_allow_html=True)
-st.markdown(f"### {st.session_state.question}")
+# Question Display Card (Renders raw LaTeX & Matrices directly inside the box)
+st.markdown(f"""
+<div class="question-box">
+    <h3 style="color:#F3F4F6; margin-top:0;">Current Question:</h3>
+    <div style="font-size: 1.25em; color: #E0E7FF;">
+        {st.session_state.question}
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # Main Grid Layout: Student Portal (Left) | Live Analytics (Right)
 col_student, col_analytics = st.columns([1, 1.2])
@@ -175,7 +181,7 @@ with col_student:
             
     st.info(f"**Assigned Group:** {assigned_group}")
     
-    # Option Selection with Native Math Rendering
+    # Option Selection
     st.write("**Select the correct option:**")
     selected_option = st.radio(
         label="Options",
