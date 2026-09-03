@@ -120,9 +120,11 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Ensure schema exists on startup
 init_db()
 
 def get_db_connection():
+    init_db()
     return sqlite3.connect(DB_FILE)
 
 # ==========================================
@@ -161,7 +163,6 @@ if st.session_state.user_role is None:
     with col_login_t:
         st.subheader("👨‍🏫 Teacher Portal")
         
-        # Tabbed interface for Login vs Sign-Up
         t_tab_login, t_tab_signup = st.tabs(["🔑 Teacher Login", "📝 New Teacher Sign-Up"])
 
         # ----------------- TEACHER LOGIN -----------------
@@ -205,12 +206,10 @@ if st.session_state.user_role is None:
                         try:
                             c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (new_user, new_pass))
                             conn.commit()
-                            # Fetch newly created user ID
                             c.execute("SELECT id, username FROM users WHERE username = ?", (new_user,))
                             user = c.fetchone()
                             conn.close()
 
-                            # Auto-login after successful registration
                             st.session_state.user_role = "Teacher"
                             st.session_state.teacher_id = user[0]
                             st.session_state.username = user[1]
@@ -252,7 +251,8 @@ if st.session_state.user_role == "Student":
     students_list = []
     if selected_classroom and not classes_df.empty:
         selected_class_id = int(classes_df[classes_df["class_name"] == selected_classroom].iloc[0]["id"])
-        students_df = pd.read_sql("SELECT roll_no, name FROM students WHERE class_id = ?", conn, params=(selected_class_id,))
+        # FIXED: Pass parameter in list []
+        students_df = pd.read_sql("SELECT roll_no, name FROM students WHERE class_id = ?", conn, params=[selected_class_id])
         students_list = [f"{row['roll_no']} - {row['name']}" for _, row in students_df.iterrows()]
     
     with col_s2:
@@ -261,7 +261,8 @@ if st.session_state.user_role == "Student":
 
     assigned_group = "Unassigned"
     if selected_class_id and student_roll:
-        grp_df = pd.read_sql("SELECT group_name FROM student_groups WHERE class_id = ? AND roll_no = ?", conn, params=(selected_class_id, student_roll))
+        # FIXED: Pass parameters in list []
+        grp_df = pd.read_sql("SELECT group_name FROM student_groups WHERE class_id = ? AND roll_no = ?", conn, params=[selected_class_id, student_roll])
         if not grp_df.empty:
             assigned_group = grp_df.iloc[0]["group_name"]
 
@@ -366,7 +367,8 @@ with tab_class_db:
                 except sqlite3.IntegrityError:
                     st.error("Classroom name error!")
 
-        classes_df = pd.read_sql("SELECT * FROM classrooms WHERE teacher_id = ?", conn, params=(st.session_state.teacher_id,))
+        # FIXED: Pass parameter in list []
+        classes_df = pd.read_sql("SELECT * FROM classrooms WHERE teacher_id = ?", conn, params=[st.session_state.teacher_id])
         if not classes_df.empty:
             selected_class_name = st.selectbox("Select Active Private Classroom:", classes_df["class_name"].tolist())
             selected_class_row = classes_df[classes_df["class_name"] == selected_class_name].iloc[0]
@@ -404,9 +406,10 @@ with tab_class_db:
     with col_c2:
         st.subheader("3. Classroom Roster & Group Formation")
         if st.session_state.active_class_id:
+            # FIXED: Pass parameter in list []
             students_in_class = pd.read_sql(
                 "SELECT roll_no, name FROM students WHERE class_id = ?", 
-                conn, params=(st.session_state.active_class_id,)
+                conn, params=[st.session_state.active_class_id]
             )
             st.write(f"Total Enrolled Students: **{len(students_in_class)}**")
             st.dataframe(students_in_class, height=180, use_container_width=True)
@@ -439,9 +442,10 @@ with tab_class_db:
                     st.session_state.groups = {}
                     st.warning("Groups dissolved for this classroom.")
 
+            # FIXED: Pass parameter in list []
             saved_grps = pd.read_sql(
                 "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?", 
-                conn, params=(st.session_state.active_class_id,)
+                conn, params=[st.session_state.active_class_id]
             )
             if not saved_grps.empty:
                 st.session_state.groups = saved_grps.groupby("group_name")["roll_no"].apply(list).to_dict()
