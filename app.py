@@ -7,6 +7,7 @@ import random
 import string
 import json
 import base64
+from sqlalchemy import text
 
 # ==========================================
 # 1. PAGE CONFIGURATION & STYLING
@@ -73,47 +74,47 @@ conn = st.connection("supabase", type="sql")
 def init_db():
     with conn.session as s:
         # Users Table (Teachers)
-        s.execute("""
+        s.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL
             );
-        """)
+        """))
         # Default Teacher Account
-        s.execute("""
+        s.execute(text("""
             INSERT INTO users (username, password) 
             VALUES ('teacher1', 'admin123') 
             ON CONFLICT (username) DO NOTHING;
-        """)
+        """))
         # Classrooms Table
-        s.execute("""
+        s.execute(text("""
             CREATE TABLE IF NOT EXISTS classrooms (
                 id SERIAL PRIMARY KEY,
                 teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                 class_name TEXT NOT NULL
             );
-        """)
+        """))
         # Students Table
-        s.execute("""
+        s.execute(text("""
             CREATE TABLE IF NOT EXISTS students (
                 id SERIAL PRIMARY KEY,
                 class_id INTEGER REFERENCES classrooms(id) ON DELETE CASCADE,
                 roll_no TEXT NOT NULL,
                 name TEXT NOT NULL
             );
-        """)
+        """))
         # Permanent Groups Table
-        s.execute("""
+        s.execute(text("""
             CREATE TABLE IF NOT EXISTS student_groups (
                 id SERIAL PRIMARY KEY,
                 class_id INTEGER REFERENCES classrooms(id) ON DELETE CASCADE,
                 group_name TEXT NOT NULL,
                 roll_no TEXT NOT NULL
             );
-        """)
+        """))
         # Topic-wise Question Bank Table
-        s.execute("""
+        s.execute(text("""
             CREATE TABLE IF NOT EXISTS question_bank (
                 id SERIAL PRIMARY KEY,
                 created_by TEXT,
@@ -124,7 +125,7 @@ def init_db():
                 correct_idx INTEGER NOT NULL,
                 image_base64 TEXT
             );
-        """)
+        """))
         s.commit()
 
 # Run DB initialization on startup
@@ -199,7 +200,7 @@ if st.session_state.user_role is None:
                     else:
                         try:
                             with conn.session as s:
-                                s.execute("INSERT INTO users (username, password) VALUES (:u, :p)", {"u": new_user, "p": new_pass})
+                                s.execute(text("INSERT INTO users (username, password) VALUES (:u, :p)"), {"u": new_user, "p": new_pass})
                                 s.commit()
                             
                             user_df = conn.query("SELECT id, username FROM users WHERE username = :u", params={"u": new_user})
@@ -345,7 +346,7 @@ with tab_class_db:
         if st.button("Create Classroom ➕"):
             if new_class:
                 with conn.session as s:
-                    s.execute("INSERT INTO classrooms (teacher_id, class_name) VALUES (:t_id, :c_name)", 
+                    s.execute(text("INSERT INTO classrooms (teacher_id, class_name) VALUES (:t_id, :c_name)"), 
                               {"t_id": st.session_state.teacher_id, "c_name": new_class})
                     s.commit()
                 st.success(f"Private Classroom '{new_class}' created!")
@@ -371,7 +372,7 @@ with tab_class_db:
                     if r_col and n_col:
                         with conn.session as s:
                             for _, row in df_up.iterrows():
-                                s.execute("INSERT INTO students (class_id, roll_no, name) VALUES (:c_id, :r_no, :name)", 
+                                s.execute(text("INSERT INTO students (class_id, roll_no, name) VALUES (:c_id, :r_no, :name)"), 
                                           {"c_id": st.session_state.active_class_id, "r_no": str(row[r_col]), "name": str(row[n_col])})
                             s.commit()
                         st.success("Uploaded and saved students into private classroom!")
@@ -382,7 +383,7 @@ with tab_class_db:
                 s_name = st.text_input("Student Name:")
                 if st.button("Add Student"):
                     with conn.session as s:
-                        s.execute("INSERT INTO students (class_id, roll_no, name) VALUES (:c_id, :r_no, :name)", 
+                        s.execute(text("INSERT INTO students (class_id, roll_no, name) VALUES (:c_id, :r_no, :name)"), 
                                   {"c_id": st.session_state.active_class_id, "r_no": s_roll, "name": s_name})
                         s.commit()
                     st.success(f"Added {s_name}!")
@@ -403,7 +404,7 @@ with tab_class_db:
                 if st.button("Auto-Form & Save Groups 🎲"):
                     if not students_in_class.empty:
                         with conn.session as s:
-                            s.execute("DELETE FROM student_groups WHERE class_id = :c_id", {"c_id": st.session_state.active_class_id})
+                            s.execute(text("DELETE FROM student_groups WHERE class_id = :c_id"), {"c_id": st.session_state.active_class_id})
                             shuffled_rolls = students_in_class["roll_no"].sample(frac=1).tolist()
                             st.session_state.groups = {}
                             for i in range(num_g):
@@ -411,7 +412,7 @@ with tab_class_db:
                                 members = shuffled_rolls[i::num_g]
                                 st.session_state.groups[grp_name] = members
                                 for r_no in members:
-                                    s.execute("INSERT INTO student_groups (class_id, group_name, roll_no) VALUES (:c_id, :g_name, :r_no)",
+                                    s.execute(text("INSERT INTO student_groups (class_id, group_name, roll_no) VALUES (:c_id, :g_name, :r_no)"),
                                               {"c_id": st.session_state.active_class_id, "g_name": grp_name, "r_no": r_no})
                             s.commit()
                         st.success(f"Formed {num_g} groups and stored in Database!")
@@ -419,7 +420,7 @@ with tab_class_db:
             with col_g2:
                 if st.button("Dissolve Groups ❌"):
                     with conn.session as s:
-                        s.execute("DELETE FROM student_groups WHERE class_id = :c_id", {"c_id": st.session_state.active_class_id})
+                        s.execute(text("DELETE FROM student_groups WHERE class_id = :c_id"), {"c_id": st.session_state.active_class_id})
                         s.commit()
                     st.session_state.groups = {}
                     st.warning("Groups dissolved for this classroom.")
@@ -454,10 +455,10 @@ with tab_q_db:
 
         if st.button("Contribute Question to Shared DB 💾"):
             with conn.session as s:
-                s.execute("""
+                s.execute(text("""
                     INSERT INTO question_bank (created_by, topic, question, option_labels, options, correct_idx) 
                     VALUES (:created_by, :topic, :question, :option_labels, :options, :correct_idx)
-                """, {
+                """), {
                     "created_by": st.session_state.username,
                     "topic": q_topic,
                     "question": q_text,
