@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 import random
 import string
 
@@ -72,7 +74,7 @@ if "groups" not in st.session_state:
 if "responses" not in st.session_state:
     st.session_state.responses = []
 
-# Default Linear Algebra / Physics question with LaTeX Matrix
+# Default question
 if "question" not in st.session_state:
     st.session_state.question = r"Eigenvalues of the matrix $$A = \begin{bmatrix} 2 & 2 \\ 0 & 3 \end{bmatrix}$$ are:"
 if "options" not in st.session_state:
@@ -134,7 +136,10 @@ if st.session_state.students_df is not None:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("2. Chart Configuration")
-chart_type = st.sidebar.selectbox("Visualization Type", ["Bar Chart (Histogram)", "Pie Chart", "Group Stacked Bar Chart"])
+chart_type = st.sidebar.selectbox(
+    "Visualization Type", 
+    ["Individual Group Histograms", "Overall Bar Chart", "Overall Pie Chart", "Group Stacked Bar Chart"]
+)
 
 # ==========================================
 # 4. MAIN INTERFACE
@@ -152,14 +157,14 @@ with st.expander("📝 Question & LaTeX Editor", expanded=False):
         st.session_state.options[2] = st.text_input("Option C", value=st.session_state.options[2])
         st.session_state.options[3] = st.text_input("Option D", value=st.session_state.options[3])
 
-# Question Box - Native Streamlit Container enables KaTeX parsing inside styled card
+# Question Box
 with st.container():
     st.markdown('<div class="question-marker"></div>', unsafe_allow_html=True)
     st.markdown("### Current Question:")
     st.markdown(st.session_state.question)
 
 # Main Grid Layout: Student Portal (Left) | Live Analytics (Right)
-col_student, col_analytics = st.columns([1, 1.2])
+col_student, col_analytics = st.columns([1, 1.3])
 
 # ------------------------------------------
 # STUDENT SIMULATOR / INTERFACE (Left Column)
@@ -177,7 +182,6 @@ with col_student:
             
     st.info(f"**Assigned Group:** {assigned_group}")
     
-    # Option Selection
     st.write("**Select the correct option:**")
     selected_option = st.radio(
         label="Options",
@@ -223,19 +227,80 @@ with col_analytics:
         df_resp = pd.DataFrame(st.session_state.responses)
         st.metric(label="Total Live Responses Received", value=len(df_resp))
         
-        if chart_type == "Bar Chart (Histogram)":
+        # 1. INDIVIDUAL GROUP HISTOGRAMS
+        if chart_type == "Individual Group Histograms":
+            unique_groups = sorted(list(st.session_state.groups.keys()))
+            num_g = len(unique_groups)
+            
+            if num_g == 0:
+                st.warning("No groups formed yet!")
+            else:
+                # Determine subplot layout grid (e.g. 2 columns)
+                cols = 2
+                rows = (num_g + 1) // 2
+                
+                fig = make_subplots(
+                    rows=rows, 
+                    cols=cols, 
+                    subplot_titles=[f"Histogram - {g}" for g in unique_groups],
+                    vertical_spacing=0.15,
+                    horizontal_spacing=0.1
+                )
+                
+                # Colors mapped to the options
+                color_map = {
+                    st.session_state.options[0]: "#3B82F6",
+                    st.session_state.options[1]: "#10B981",
+                    st.session_state.options[2]: "#F59E0B",
+                    st.session_state.options[3]: "#EF4444"
+                }
+                
+                for idx, grp in enumerate(unique_groups):
+                    row = (idx // cols) + 1
+                    col = (idx % cols) + 1
+                    
+                    grp_data = df_resp[df_resp["Group"] == grp]
+                    
+                    # Count responses per option for this group
+                    counts = grp_data["Option"].value_counts()
+                    
+                    x_vals = st.session_state.options
+                    y_vals = [counts.get(opt, 0) for opt in x_vals]
+                    
+                    # Create bar plot for each group
+                    fig.add_trace(
+                        go.Bar(
+                            x=[f"Opt {i+1}" for i in range(len(x_vals))],
+                            y=y_vals,
+                            name=grp,
+                            marker_color=["#3B82F6", "#10B981", "#F59E0B", "#EF4444"],
+                            showlegend=False
+                        ),
+                        row=row, col=col
+                    )
+                
+                fig.update_layout(
+                    template="plotly_dark",
+                    height=250 * rows,
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # 2. OVERALL BAR CHART
+        elif chart_type == "Overall Bar Chart":
             fig = px.histogram(
                 df_resp, 
                 x="Option", 
                 color="Option",
-                title="Aggregate Poll Count",
+                title="Aggregate Class Poll",
                 template="plotly_dark",
                 color_discrete_sequence=px.colors.qualitative.Vivid
             )
             fig.update_layout(showlegend=False, xaxis_title="Selected Answer", yaxis_title="Votes")
             st.plotly_chart(fig, use_container_width=True)
 
-        elif chart_type == "Pie Chart":
+        # 3. OVERALL PIE CHART
+        elif chart_type == "Overall Pie Chart":
             pie_data = df_resp["Option"].value_counts().reset_index()
             pie_data.columns = ["Option", "Count"]
             fig = px.pie(
@@ -249,13 +314,14 @@ with col_analytics:
             fig.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig, use_container_width=True)
 
+        # 4. GROUP STACKED BAR CHART
         elif chart_type == "Group Stacked Bar Chart":
             fig = px.histogram(
                 df_resp, 
                 x="Group", 
                 color="Option",
                 barmode="group",
-                title="Group-wise Poll Breakdown",
+                title="Group-wise Poll Comparison",
                 template="plotly_dark",
                 color_discrete_sequence=px.colors.qualitative.Bold
             )
