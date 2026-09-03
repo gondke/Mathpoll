@@ -67,7 +67,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. DATABASE ENGINE (POSTGRESQL / SUPABASE)
+# 2. DATABASE ENGINE & INITIALIZATION
 # ==========================================
 conn = st.connection("supabase", type="sql")
 
@@ -128,8 +128,13 @@ def init_db():
         """))
         s.commit()
 
-# Run DB initialization on startup
-init_db()
+# Safe DB initialization wrapper
+try:
+    init_db()
+except Exception as e:
+    st.error("⚠️ Unable to connect to the database. Please check your credentials in secrets.toml and network connection.")
+    st.sidebar.error("Database Connection Failed")
+    st.stop()
 
 # ==========================================
 # 3. SESSION STATE INITIALIZATION
