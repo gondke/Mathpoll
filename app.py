@@ -7,10 +7,10 @@ import random
 import string
 
 # ==========================================
-# 1. PAGE CONFIGURATION & STYLING
+# 1. PAGE CONFIGURATION & HIGH-CONTRAST STYLING
 # ==========================================
 st.set_page_config(
-    page_title="MathPhys Chem Real-Time Polling",
+    page_title="STEM Real-Time Polling System",
     page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -25,7 +25,7 @@ st.markdown("""
         color: #FFFFFF;
     }
     
-    /* High contrast card metric */
+    /* High contrast cards */
     .metric-card {
         background-color: #1F2937;
         border: 2px solid #3B82F6;
@@ -35,7 +35,7 @@ st.markdown("""
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     }
     
-    /* Target Streamlit's container element to style it as the Question Box */
+    /* Styled Question Box */
     [data-testid="stVerticalBlock"] > div:has(div.question-marker) {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 2px solid #818CF8;
@@ -74,9 +74,11 @@ if "groups" not in st.session_state:
 if "responses" not in st.session_state:
     st.session_state.responses = []
 
-# Default question
+# Default Linear Algebra / Physics question
 if "question" not in st.session_state:
     st.session_state.question = r"Eigenvalues of the matrix $$A = \begin{bmatrix} 2 & 2 \\ 0 & 3 \end{bmatrix}$$ are:"
+if "option_labels" not in st.session_state:
+    st.session_state.option_labels = ["A", "B", "C", "D"]
 if "options" not in st.session_state:
     st.session_state.options = [
         r"$\lambda_1 = 2, \lambda_2 = 3$",
@@ -101,7 +103,6 @@ st.sidebar.markdown(f"""
 st.sidebar.markdown("---")
 st.sidebar.subheader("1. Student & Group Roster")
 
-# Student Data Input
 upload_option = st.sidebar.radio("Input Student Roster", ["Generate Sample Data (100 Students)", "Upload CSV File"])
 
 if upload_option == "Generate Sample Data (100 Students)":
@@ -112,7 +113,6 @@ if upload_option == "Generate Sample Data (100 Students)":
         }
         st.session_state.students_df = pd.DataFrame(data)
         st.sidebar.success("Generated 100 student records!")
-
 else:
     uploaded_file = st.sidebar.file_uploader("Upload CSV (Columns: Roll_No, Name)", type=["csv"])
     if uploaded_file:
@@ -142,138 +142,206 @@ chart_type = st.sidebar.selectbox(
 )
 
 # ==========================================
-# 4. MAIN INTERFACE
+# 4. NAVIGATION TABS (SEPARATE ANALYTICS PAGE)
 # ==========================================
 st.title("🧪 STEM Live Real-Time Polling System")
 
-# TeX Question Editor
-with st.expander("📝 Question & LaTeX Editor", expanded=False):
-    st.session_state.question = st.text_input("Enter Question (Use $...$ for inline or $$\\dots$$ for block LaTeX):", value=st.session_state.question)
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.session_state.options[0] = st.text_input("Option A", value=st.session_state.options[0])
-        st.session_state.options[1] = st.text_input("Option B", value=st.session_state.options[1])
-    with col_b:
-        st.session_state.options[2] = st.text_input("Option C", value=st.session_state.options[2])
-        st.session_state.options[3] = st.text_input("Option D", value=st.session_state.options[3])
-
-# Question Box
-with st.container():
-    st.markdown('<div class="question-marker"></div>', unsafe_allow_html=True)
-    st.markdown("### Current Question:")
-    st.markdown(st.session_state.question)
-
-# Main Grid Layout: Student Portal (Left) | Live Analytics (Right)
-col_student, col_analytics = st.columns([1, 1.3])
+tab_portal, tab_analytics = st.tabs([
+    "📲 Student Portal & Question Editor", 
+    "📺 Live Classroom Analytics (Full Screen Display)"
+])
 
 # ------------------------------------------
-# STUDENT SIMULATOR / INTERFACE (Left Column)
+# TAB 1: QUESTION EDITOR & STUDENT PORTAL
 # ------------------------------------------
-with col_student:
-    st.subheader("📲 Student Response Portal")
-    
-    student_roll = st.text_input("Enter Your Roll Number:", value="2026_STEM_001")
-    
-    assigned_group = "Unassigned"
-    for grp, members in st.session_state.groups.items():
-        if student_roll in members:
-            assigned_group = grp
-            break
-            
-    st.info(f"**Assigned Group:** {assigned_group}")
-    
-    st.write("**Select the correct option:**")
-    selected_option = st.radio(
-        label="Options",
-        options=st.session_state.options,
-        label_visibility="collapsed"
-    )
-    
-    if st.button("Submit Answer 🚀"):
-        if assigned_group == "Unassigned":
-            st.error("Please form groups in the sidebar first!")
-        else:
-            st.session_state.responses.append({
-                "Roll_No": student_roll,
-                "Group": assigned_group,
-                "Option": selected_option
-            })
-            st.success("Response recorded in real-time!")
+with tab_portal:
+    # Flexible TeX Question & Options Editor
+    with st.expander("📝 Question & Flexible Option Editor", expanded=True):
+        st.session_state.question = st.text_input(
+            "Enter Question (Use $...$ for inline or $$\\dots$$ for block LaTeX):", 
+            value=st.session_state.question
+        )
+        
+        st.markdown("**Option Prefixes / Symbols:**")
+        prefix_preset = st.radio(
+            "Select Prefix Preset or Choose Custom:",
+            ["A, B, C, D", "1, 2, 3, 4", "(i), (ii), (iii), (iv)", "Custom Symbols"],
+            horizontal=True
+        )
+        
+        if prefix_preset == "A, B, C, D":
+            st.session_state.option_labels = ["Option A", "Option B", "Option C", "Option D"]
+        elif prefix_preset == "1, 2, 3, 4":
+            st.session_state.option_labels = ["Option 1", "Option 2", "Option 3", "Option 4"]
+        elif prefix_preset == "(i), (ii), (iii), (iv)":
+            st.session_state.option_labels = ["Option (i)", "Option (ii)", "Option (iii)", "Option (iv)"]
+        
+        col_lbl1, col_lbl2, col_lbl3, col_lbl4 = st.columns(4)
+        if prefix_preset == "Custom Symbols":
+            with col_lbl1:
+                st.session_state.option_labels[0] = st.text_input("Label 1", value=st.session_state.option_labels[0])
+            with col_lbl2:
+                st.session_state.option_labels[1] = st.text_input("Label 2", value=st.session_state.option_labels[1])
+            with col_lbl3:
+                st.session_state.option_labels[2] = st.text_input("Label 3", value=st.session_state.option_labels[2])
+            with col_lbl4:
+                st.session_state.option_labels[3] = st.text_input("Label 4", value=st.session_state.option_labels[3])
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.session_state.options[0] = st.text_input(f"Content for {st.session_state.option_labels[0]}", value=st.session_state.options[0])
+            st.session_state.options[1] = st.text_input(f"Content for {st.session_state.option_labels[1]}", value=st.session_state.options[1])
+        with col_b:
+            st.session_state.options[2] = st.text_input(f"Content for {st.session_state.option_labels[2]}", value=st.session_state.options[2])
+            st.session_state.options[3] = st.text_input(f"Content for {st.session_state.option_labels[3]}", value=st.session_state.options[3])
+
+    # Current Question Card
+    with st.container():
+        st.markdown('<div class="question-marker"></div>', unsafe_allow_html=True)
+        st.markdown("### Current Question:")
+        st.markdown(st.session_state.question)
 
     st.markdown("---")
-    if st.button("⚡ Simulate Random Class Responses (80 Students)"):
-        if not st.session_state.groups:
-            st.warning("Please setup groups first!")
-        else:
-            st.session_state.responses = []
-            for grp, members in st.session_state.groups.items():
-                for student in members:
-                    st.session_state.responses.append({
-                        "Roll_No": student,
-                        "Group": grp,
-                        "Option": random.choice(st.session_state.options)
-                    })
-            st.rerun()
+    
+    # Student Interface
+    col_stu_input, col_sim = st.columns([1.2, 1])
+    
+    with col_stu_input:
+        st.subheader("📲 Submit Response")
+        student_roll = st.text_input("Enter Your Roll Number:", value="2026_STEM_001")
+        
+        assigned_group = "Unassigned"
+        for grp, members in st.session_state.groups.items():
+            if student_roll in members:
+                assigned_group = grp
+                break
+                
+        st.info(f"**Assigned Group:** {assigned_group}")
+        
+        # Combine Label + Content for Radio Display
+        formatted_choices = [
+            f"**{st.session_state.option_labels[i]}:** {st.session_state.options[i]}" 
+            for i in range(len(st.session_state.options))
+        ]
+        
+        selected_idx = st.radio(
+            label="Options",
+            options=range(len(formatted_choices)),
+            format_func=lambda x: formatted_choices[x],
+            label_visibility="collapsed"
+        )
+        
+        if st.button("Submit Answer 🚀"):
+            if assigned_group == "Unassigned":
+                st.error("Please form groups in the sidebar first!")
+            else:
+                st.session_state.responses.append({
+                    "Roll_No": student_roll,
+                    "Group": assigned_group,
+                    "Option_Index": selected_idx,
+                    "Label": st.session_state.option_labels[selected_idx]
+                })
+                st.success("Response recorded in real-time!")
+
+    with col_sim:
+        st.subheader("⚡ Teacher Quick Test")
+        st.write("Simulate 80 student responses to quickly test chart rendering:")
+        if st.button("Simulate Random Class Responses (80 Students)"):
+            if not st.session_state.groups:
+                st.warning("Please setup groups first in the sidebar!")
+            else:
+                st.session_state.responses = []
+                for grp, members in st.session_state.groups.items():
+                    for student in members:
+                        rand_idx = random.randint(0, len(st.session_state.options) - 1)
+                        st.session_state.responses.append({
+                            "Roll_No": student,
+                            "Group": grp,
+                            "Option_Index": rand_idx,
+                            "Label": st.session_state.option_labels[rand_idx]
+                        })
+                st.rerun()
 
 # ------------------------------------------
-# LIVE ANALYTICS & CHARTS (Right Column)
+# TAB 2: LIVE CLASSROOM ANALYTICS (DEDICATED DISPLAY)
 # ------------------------------------------
-with col_analytics:
-    st.subheader("📊 Live Poll Analytics")
+with tab_analytics:
+    st.markdown("## 📊 Live Classroom Poll Results")
     
     if len(st.session_state.responses) == 0:
-        st.warning("Awaiting live responses from students...")
+        st.warning("Awaiting live responses from students... Submit votes in the Student Portal tab!")
     else:
         df_resp = pd.DataFrame(st.session_state.responses)
-        st.metric(label="Total Live Responses Received", value=len(df_resp))
+        total_votes = len(df_resp)
         
+        col_m1, col_m2 = st.columns([1, 4])
+        with col_m1:
+            st.metric(label="Total Responses", value=total_votes)
+            if st.button("Reset Poll Data 🔄"):
+                st.session_state.responses = []
+                st.rerun()
+                
+        with col_m2:
+            st.markdown(f"**Question:** {st.session_state.question}")
+
+        st.markdown("---")
+
+        # Helper function to get color array highlighting the maximum bar
+        def get_highlight_colors(values, default_color="#3B82F6", max_color="#10B981"):
+            if not values or max(values) == 0:
+                return [default_color] * len(values)
+            max_val = max(values)
+            return [max_color if v == max_val else default_color for v in values]
+
         # 1. INDIVIDUAL GROUP HISTOGRAMS
         if chart_type == "Individual Group Histograms":
             unique_groups = sorted(list(st.session_state.groups.keys()))
             num_g = len(unique_groups)
             
             if num_g == 0:
-                st.warning("No groups formed yet!")
+                st.warning("No groups formed yet! Use the sidebar to set up groups.")
             else:
-                # Determine subplot layout grid (e.g. 2 columns)
                 cols = 2
                 rows = (num_g + 1) // 2
                 
                 fig = make_subplots(
                     rows=rows, 
                     cols=cols, 
-                    subplot_titles=[f"Histogram - {g}" for g in unique_groups],
-                    vertical_spacing=0.15,
-                    horizontal_spacing=0.1
+                    subplot_titles=[f"Group: {g}" for g in unique_groups],
+                    vertical_spacing=0.2,
+                    horizontal_spacing=0.12
                 )
                 
-                # Colors mapped to the options
-                color_map = {
-                    st.session_state.options[0]: "#3B82F6",
-                    st.session_state.options[1]: "#10B981",
-                    st.session_state.options[2]: "#F59E0B",
-                    st.session_state.options[3]: "#EF4444"
-                }
+                x_labels = st.session_state.option_labels
                 
                 for idx, grp in enumerate(unique_groups):
                     row = (idx // cols) + 1
                     col = (idx % cols) + 1
                     
                     grp_data = df_resp[df_resp["Group"] == grp]
+                    grp_total = len(grp_data)
                     
-                    # Count responses per option for this group
-                    counts = grp_data["Option"].value_counts()
+                    counts = grp_data["Option_Index"].value_counts()
+                    y_counts = [counts.get(i, 0) for i in range(len(x_labels))]
                     
-                    x_vals = st.session_state.options
-                    y_vals = [counts.get(opt, 0) for opt in x_vals]
+                    # Calculate percentage text
+                    pct_texts = [
+                        f"{y_counts[i]} ({y_counts[i]/grp_total*100:.1f}%)" if grp_total > 0 else "0 (0%)" 
+                        for i in range(len(x_labels))
+                    ]
                     
-                    # Create bar plot for each group
+                    # Highest bar color highlight
+                    bar_colors = get_highlight_colors(y_counts, default_color="#6366F1", max_color="#10B981")
+                    
                     fig.add_trace(
                         go.Bar(
-                            x=[f"Opt {i+1}" for i in range(len(x_vals))],
-                            y=y_vals,
-                            name=grp,
-                            marker_color=["#3B82F6", "#10B981", "#F59E0B", "#EF4444"],
+                            x=x_labels,
+                            y=y_counts,
+                            text=pct_texts,
+                            textposition="auto",
+                            marker_color=bar_colors,
+                            marker_line_color="#FFFFFF",
+                            marker_line_width=1.5,
                             showlegend=False
                         ),
                         row=row, col=col
@@ -281,37 +349,55 @@ with col_analytics:
                 
                 fig.update_layout(
                     template="plotly_dark",
-                    height=250 * rows,
+                    height=300 * rows,
                     margin=dict(l=20, r=20, t=40, b=20)
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
         # 2. OVERALL BAR CHART
         elif chart_type == "Overall Bar Chart":
-            fig = px.histogram(
-                df_resp, 
-                x="Option", 
-                color="Option",
-                title="Aggregate Class Poll",
+            counts = df_resp["Option_Index"].value_counts()
+            x_labels = st.session_state.option_labels
+            y_counts = [counts.get(i, 0) for i in range(len(x_labels))]
+            
+            pct_texts = [f"{v} ({v/total_votes*100:.1f}%)" for v in y_counts]
+            bar_colors = get_highlight_colors(y_counts, default_color="#3B82F6", max_color="#10B981")
+            
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=x_labels,
+                    y=y_counts,
+                    text=pct_texts,
+                    textposition="auto",
+                    marker_color=bar_colors,
+                    marker_line_color="#FFFFFF",
+                    marker_line_width=2
+                )
+            ])
+            fig.update_layout(
+                title="Overall Aggregate Class Poll (Highest Option Highlighted in Green)",
                 template="plotly_dark",
-                color_discrete_sequence=px.colors.qualitative.Vivid
+                xaxis_title="Options",
+                yaxis_title="Vote Count",
+                height=500
             )
-            fig.update_layout(showlegend=False, xaxis_title="Selected Answer", yaxis_title="Votes")
             st.plotly_chart(fig, use_container_width=True)
 
         # 3. OVERALL PIE CHART
         elif chart_type == "Overall Pie Chart":
-            pie_data = df_resp["Option"].value_counts().reset_index()
-            pie_data.columns = ["Option", "Count"]
+            pie_data = df_resp["Label"].value_counts().reset_index()
+            pie_data.columns = ["Label", "Count"]
+            
             fig = px.pie(
                 pie_data, 
                 values="Count", 
-                names="Option",
-                title="Overall Choice Distribution",
+                names="Label",
+                title="Overall Choice Percentage Distribution",
                 template="plotly_dark",
-                color_discrete_sequence=px.colors.qualitative.Pastel
+                color_discrete_sequence=px.colors.qualitative.Vivid
             )
-            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_traces(textposition='inside', textinfo='percent+label+value')
+            fig.update_layout(height=500)
             st.plotly_chart(fig, use_container_width=True)
 
         # 4. GROUP STACKED BAR CHART
@@ -319,15 +405,12 @@ with col_analytics:
             fig = px.histogram(
                 df_resp, 
                 x="Group", 
-                color="Option",
+                color="Label",
                 barmode="group",
-                title="Group-wise Poll Comparison",
+                title="Group-wise Choice Comparison",
                 template="plotly_dark",
-                color_discrete_sequence=px.colors.qualitative.Bold
+                color_discrete_sequence=px.colors.qualitative.Bold,
+                text_auto=True
             )
-            fig.update_layout(xaxis_title="Groups", yaxis_title="Number of Votes")
+            fig.update_layout(xaxis_title="Groups", yaxis_title="Number of Votes", height=500)
             st.plotly_chart(fig, use_container_width=True)
-
-        if st.button("Reset Poll Data"):
-            st.session_state.responses = []
-            st.rerun()
