@@ -7,6 +7,15 @@ import random
 import string
 import sqlite3
 import json
+import base64
+from io import BytesIO
+
+# Try importing PyPDF2 for PDF processing
+try:
+    import PyPDF2
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 # ==========================================
 # 1. PAGE CONFIGURATION & STYLING
@@ -29,12 +38,24 @@ st.markdown("""
         text-align: center;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     }
-    [data-testid="stVerticalBlock"] > div:has(div.question-marker) {
+    /* Unified Question Box Styling with Enriched Font Size */
+    .unified-question-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 2px solid #818CF8;
         border-radius: 15px;
-        padding: 20px;
-        margin-bottom: 20px;
+        padding: 28px;
+        margin-bottom: 25px;
+        font-size: 1.35em !important;
+        line-height: 1.6;
+    }
+    .unified-question-box h2 {
+        font-size: 1.7em !important;
+        color: #60A5FA !important;
+        margin-bottom: 15px;
+    }
+    .unified-question-box h3 {
+        font-size: 1.4em !important;
+        color: #FFFFFF !important;
     }
     @keyframes blinkGlow {
         0% { border-color: #FFD700; box-shadow: 0 0 15px #FFD700; }
@@ -55,17 +76,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. SQLITE DATABASE ENGINE & HELPER FUNCTIONS
+# 2. SQLITE DATABASE ENGINE & MIGRATION
 # ==========================================
 DB_FILE = "quiz_system.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # Users Table (Teachers)
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL
+                )''')
+    # Default Teacher Account
+    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("teacher1", "admin123"))
+    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("teacher2", "admin123"))
+
     # Classrooms Table
     c.execute('''CREATE TABLE IF NOT EXISTS classrooms (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    class_name TEXT UNIQUE NOT NULL
+                    teacher_id INTEGER,
+                    class_name TEXT NOT NULL,
+                    FOREIGN KEY(teacher_id) REFERENCES users(id)
                 )''')
     # Students Table
     c.execute('''CREATE TABLE IF NOT EXISTS students (
@@ -83,14 +116,16 @@ def init_db():
                     roll_no TEXT NOT NULL,
                     FOREIGN KEY(class_id) REFERENCES classrooms(id)
                 )''')
-    # Topic-wise Question Bank Table
+    # Topic-wise Question Bank Table (Shared across all teachers)
     c.execute('''CREATE TABLE IF NOT EXISTS question_bank (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_by TEXT,
                     topic TEXT NOT NULL,
                     question TEXT NOT NULL,
                     option_labels TEXT NOT NULL,
                     options TEXT NOT NULL,
-                    correct_idx INTEGER NOT NULL
+                    correct_idx INTEGER NOT NULL,
+                    image_base64 TEXT
                 )''')
     conn.commit()
     conn.close()
@@ -103,6 +138,12 @@ def get_db_connection():
 # ==========================================
 # 3. SESSION STATE INITIALIZATION
 # ==========================================
+if "user_role" not in st.session_state:
+    st.session_state.user_role = None  # Options: 'Teacher', 'Student'
+if "teacher_id" not in st.session_state:
+    st.session_state.teacher_id = None
+if "username" not in st.session_state:
+    st.session_state.username = None
 if "quiz_code" not in st.session_state:
     st.session_state.quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 if "active_class_id" not in st.session_state:
@@ -119,9 +160,130 @@ if "quiz_ended" not in st.session_state:
     st.session_state.quiz_ended = False
 
 # ==========================================
-# 4. SIDEBAR CONTROLS & SESSION CODE
+# 4. LOGIN & ROLE SELECTION SYSTEM
 # ==========================================
-st.sidebar.title("⚛️ Teacher Dashboard")
+if st.session_state.user_role is None:
+    st.title("🧪 STEM Live Quiz Platform")
+    st.markdown("### Welcome! Please select your entry mode to continue:")
+    
+    col_login_t, col_login_s = st.columns(2)
+
+    with col_login_t:
+        st.subheader("👨‍🏫 Teacher Portal")
+        with st.form("teacher_login_form"):
+            t_user = st.text_input("Username", value="teacher1")
+            t_pass = st.text_input("Password", type="password", value="admin123")
+            submit_teacher = st.form_submit_button("Teacher Login 🔑")
+
+            if submit_teacher:
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("SELECT id, username FROM users WHERE username = ? AND password = ?", (t_user, t_pass))
+                user = c.fetchone()
+                conn.close()
+                if user:
+                    st.session_state.user_role = "Teacher"
+                    st.session_state.teacher_id = user[0]
+                    st.session_state.username = user[1]
+                    st.success(f"Welcome back, {user[1]}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid Username or Password.")
+
+    with col_login_s:
+        st.subheader("🎓 Student Portal (Join via Session Code)")
+        with st.form("student_code_form"):
+            entered_code = st.text_input("Enter 6-Digit Session Code:")
+            submit_student = st.form_submit_button("Join Live Quiz 🚀")
+
+            if submit_student:
+                if entered_code.strip().upper() == st.session_state.quiz_code:
+                    st.session_state.user_role = "Student"
+                    st.success("Session Code Verified! Redirecting to Quiz...")
+                    st.rerun()
+                else:
+                    st.error("Invalid Session Code! Please check with your teacher.")
+    st.stop()
+
+# ==========================================
+# 5. STUDENT-ONLY INTERFACE
+# ==========================================
+if st.session_state.user_role == "Student":
+    st.title("📲 Student Live Poll Portal")
+    
+    conn = get_db_connection()
+    classes_df = pd.read_sql("SELECT * FROM classrooms", conn)
+    
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        selected_classroom = st.selectbox("Select Classroom:", classes_df["class_name"].tolist() if not classes_df.empty else [])
+    
+    selected_class_id = None
+    students_list = []
+    if selected_classroom and not classes_df.empty:
+        selected_class_id = int(classes_df[classes_df["class_name"] == selected_classroom].iloc[0]["id"])
+        students_df = pd.read_sql("SELECT roll_no, name FROM students WHERE class_id = ?", conn, params=(selected_class_id,))
+        students_list = [f"{row['roll_no']} - {row['name']}" for _, row in students_df.iterrows()]
+    
+    with col_s2:
+        selected_student = st.selectbox("Select Your Roll Number & Name:", students_list)
+        student_roll = selected_student.split(" - ")[0] if selected_student else ""
+
+    # Fetch Group Assignment
+    assigned_group = "Unassigned"
+    if selected_class_id and student_roll:
+        grp_df = pd.read_sql("SELECT group_name FROM student_groups WHERE class_id = ? AND roll_no = ?", conn, params=(selected_class_id, student_roll))
+        if not grp_df.empty:
+            assigned_group = grp_df.iloc[0]["group_name"]
+
+    st.info(f"**Assigned Group:** {assigned_group}")
+    conn.close()
+
+    st.markdown("---")
+
+    # Display Active Quiz Question
+    if not st.session_state.quiz_questions:
+        st.warning("Waiting for teacher to start/import quiz questions...")
+    else:
+        curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
+
+        # Enriched Font & Unified Question Box
+        st.markdown(f"""
+        <div class="unified-question-box">
+            <h2>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</h2>
+            <h3>{curr_q['question']}</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if curr_q.get("image_base64"):
+            st.image(f"data:image/png;base64,{curr_q['image_base64']}", use_container_width=True)
+
+        # Options Inside Unified Block Framework
+        choices = [f"**{curr_q['option_labels'][i]}:** {curr_q['options'][i]}" for i in range(len(curr_q['options']))]
+        selected_idx = st.radio("Choose Option:", options=range(len(choices)), format_func=lambda x: choices[x])
+
+        if st.button("Submit Vote 🚀", use_container_width=True):
+            if assigned_group == "Unassigned":
+                st.error("You are not assigned to a group in this classroom yet!")
+            else:
+                st.session_state.responses.append({
+                    "Q_Idx": st.session_state.current_q_idx,
+                    "Roll_No": student_roll,
+                    "Group": assigned_group,
+                    "Option_Index": selected_idx,
+                    "Label": curr_q['option_labels'][selected_idx]
+                })
+                st.success("Response recorded successfully!")
+
+    if st.sidebar.button("Logout Student"):
+        st.session_state.user_role = None
+        st.rerun()
+    st.stop()
+
+# ==========================================
+# 6. TEACHER DASHBOARD & CONTROLS
+# ==========================================
+st.sidebar.title(f"👨‍🏫 {st.session_state.username}'s Dashboard")
 
 st.sidebar.markdown(f"""
 <div class="metric-card">
@@ -134,47 +296,54 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Visualization Type")
 chart_type = st.sidebar.selectbox(
     "Select Chart", 
-    ["Individual Group Histograms", "Overall Bar Chart", "Overall Pie Chart", "Group Stacked Bar Chart"]
+    ["Individual Group Histograms", "Individual Group Pie Charts", "Overall Bar Chart", "Overall Pie Chart", "Group Stacked Bar Chart"]
 )
 
-# ==========================================
-# 5. MAIN NAVIGATION TABS
-# ==========================================
-st.title("🧪 STEM Live Quiz & Classroom Manager")
+if st.sidebar.button("Logout Teacher 🚪"):
+    st.session_state.user_role = None
+    st.session_state.teacher_id = None
+    st.session_state.username = None
+    st.rerun()
 
-tab_class_db, tab_q_db, tab_portal, tab_analytics = st.tabs([
-    "🏫 Classroom & Group DB Manager", 
-    "📚 Topic-Wise Question Bank DB", 
-    "📲 Student Portal & Live Quiz", 
-    "📺 Live Analytics & Leaderboard"
+# ==========================================
+# 7. TEACHER TABS MANAGEMENT
+# ==========================================
+st.title("🧪 STEM Live Quiz & Private Class Manager")
+
+tab_class_db, tab_q_db, tab_media_quiz, tab_portal, tab_analytics = st.tabs([
+    "🏫 Classroom DB (Private)", 
+    "📚 Question Bank (Shared DB)", 
+    "📷 Image/PDF Quiz Creator",
+    "📲 Live Control", 
+    "📺 Analytics & Leaderboard"
 ])
 
 # ------------------------------------------
-# TAB 1: CLASSROOM & GROUP DATABASE MANAGER
+# TAB 1: TEACHER PRIVATE CLASSROOM & GROUPS
 # ------------------------------------------
 with tab_class_db:
-    st.header("🗄️ Permanent Classroom & Group Roster Database")
+    st.header(f"🗄️ Private Classroom Roster — {st.session_state.username}")
     col_c1, col_c2 = st.columns([1, 1])
 
     conn = get_db_connection()
     
     with col_c1:
-        st.subheader("1. Create / Manage Classrooms")
-        new_class = st.text_input("New Classroom Name (e.g., 'Grade 10 Physics'):")
+        st.subheader("1. Create / Select Private Classroom")
+        new_class = st.text_input("New Classroom Name (e.g., 'Physics 10B'):")
         if st.button("Create Classroom ➕"):
             if new_class:
                 try:
                     c = conn.cursor()
-                    c.execute("INSERT INTO classrooms (class_name) VALUES (?)", (new_class,))
+                    c.execute("INSERT INTO classrooms (teacher_id, class_name) VALUES (?, ?)", (st.session_state.teacher_id, new_class))
                     conn.commit()
-                    st.success(f"Classroom '{new_class}' created!")
+                    st.success(f"Private Classroom '{new_class}' created!")
                 except sqlite3.IntegrityError:
-                    st.error("Classroom name already exists!")
+                    st.error("Classroom name error!")
 
-        # Load Existing Classrooms
-        classes_df = pd.read_sql("SELECT * FROM classrooms", conn)
+        # Load ONLY classrooms owned by logged in teacher
+        classes_df = pd.read_sql("SELECT * FROM classrooms WHERE teacher_id = ?", conn, params=(st.session_state.teacher_id,))
         if not classes_df.empty:
-            selected_class_name = st.selectbox("Select Active Classroom:", classes_df["class_name"].tolist())
+            selected_class_name = st.selectbox("Select Active Private Classroom:", classes_df["class_name"].tolist())
             selected_class_row = classes_df[classes_df["class_name"] == selected_class_name].iloc[0]
             st.session_state.active_class_id = int(selected_class_row["id"])
             
@@ -186,11 +355,18 @@ with tab_class_db:
                 up_file = st.file_uploader("Upload CSV (Columns: Roll_No, Name)", type=["csv"])
                 if up_file and st.button("Save Students to Database"):
                     df_up = pd.read_csv(up_file)
-                    for _, row in df_up.iterrows():
-                        conn.execute("INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)", 
-                                     (st.session_state.active_class_id, str(row["Roll_No"]), str(row["Name"])))
-                    conn.commit()
-                    st.success("Uploaded and saved students into classroom DB!")
+                    df_up.columns = df_up.columns.str.strip().str.lower()
+                    r_col = next((c for c in df_up.columns if "roll" in c), None)
+                    n_col = next((c for c in df_up.columns if "name" in c), None)
+
+                    if r_col and n_col:
+                        for _, row in df_up.iterrows():
+                            conn.execute("INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)", 
+                                         (st.session_state.active_class_id, str(row[r_col]), str(row[n_col])))
+                        conn.commit()
+                        st.success("Uploaded and saved students into private classroom!")
+                    else:
+                        st.error("CSV must contain 'Roll_No' and 'Name' headers!")
             else:
                 s_roll = st.text_input("Roll Number:")
                 s_name = st.text_input("Student Name:")
@@ -238,7 +414,7 @@ with tab_class_db:
                     st.session_state.groups = {}
                     st.warning("Groups dissolved for this classroom.")
 
-            # Load Saved Groups from DB
+            # Load Saved Groups
             saved_grps = pd.read_sql(
                 "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?", 
                 conn, params=(st.session_state.active_class_id,)
@@ -251,17 +427,17 @@ with tab_class_db:
     conn.close()
 
 # ------------------------------------------
-# TAB 2: TOPIC-WISE QUESTION BANK DATABASE
+# TAB 2: SHARED QUESTION BANK DB & BULK CHECKBOXES
 # ------------------------------------------
 with tab_q_db:
-    st.header("📚 Topic-Wise Question Bank Database")
+    st.header("📚 Shared Question Bank DB (Contribute & Select)")
     conn = get_db_connection()
 
-    col_q1, col_q2 = st.columns([1, 1])
+    col_q1, col_q2 = st.columns([1, 1.2])
 
     with col_q1:
-        st.subheader("1. Add Question to Database")
-        q_topic = st.text_input("Topic Name (e.g., 'Linear Algebra', 'Calculus'):", value="Linear Algebra")
+        st.subheader("1. Add Question to Shared DB")
+        q_topic = st.text_input("Topic Name:", value="Linear Algebra")
         q_text = st.text_area("Question Text (LaTeX Supported):", value=r"Eigenvalues of $A = \begin{bmatrix} 2 & 2 \\ 0 & 3 \end{bmatrix}$ are:")
         
         col_op1, col_op2 = st.columns(2)
@@ -274,54 +450,166 @@ with tab_q_db:
 
         correct_op = st.selectbox("Correct Option Index:", [0, 1, 2, 3], format_func=lambda x: f"Option {chr(65+x)}")
 
-        if st.button("Save Question to DB 💾"):
+        if st.button("Contribute Question to Shared DB 💾"):
             conn.execute(
-                "INSERT INTO question_bank (topic, question, option_labels, options, correct_idx) VALUES (?, ?, ?, ?, ?)",
-                (q_topic, q_text, json.dumps(["Option A", "Option B", "Option C", "Option D"]), json.dumps([op_a, op_b, op_c, op_d]), correct_op)
+                "INSERT INTO question_bank (created_by, topic, question, option_labels, options, correct_idx) VALUES (?, ?, ?, ?, ?, ?)",
+                (st.session_state.username, q_topic, q_text, json.dumps(["Option A", "Option B", "Option C", "Option D"]), json.dumps([op_a, op_b, op_c, op_d]), correct_op)
             )
             conn.commit()
-            st.success("Question saved to database topic-wise!")
+            st.success("Question saved to shared database!")
 
     with col_q2:
-        st.subheader("2. Import Topic Questions to Live Quiz")
+        st.subheader("2. Select Individual/Bulk Questions for Quiz")
         q_bank_df = pd.read_sql("SELECT * FROM question_bank", conn)
         
         if not q_bank_df.empty:
-            topics = q_bank_df["topic"].unique().tolist()
+            topics = ["All Topics"] + q_bank_df["topic"].unique().tolist()
             selected_topic = st.selectbox("Filter Question Bank by Topic:", topics)
             
-            filtered_qs = q_bank_df[q_bank_df["topic"] == selected_topic]
-            st.dataframe(filtered_qs[["id", "topic", "question"]], use_container_width=True)
+            filtered_qs = q_bank_df if selected_topic == "All Topics" else q_bank_df[q_bank_df["topic"] == selected_topic]
             
-            if st.button("Import All Questions in Topic to Active Quiz 🚀"):
-                st.session_state.quiz_questions = []
-                for _, row in filtered_qs.iterrows():
-                    st.session_state.quiz_questions.append({
-                        "question": row["question"],
-                        "option_labels": json.loads(row["option_labels"]),
-                        "options": json.loads(row["options"]),
-                        "correct_idx": int(row["correct_idx"])
-                    })
-                st.session_state.current_q_idx = 0
-                st.success(f"Imported {len(filtered_qs)} questions into active quiz session!")
+            # Checkbox Selection System
+            st.write("Select questions using checkboxes below:")
+            selected_q_ids = []
+            
+            # Master Select All
+            select_all = st.checkbox("Select All Filtered Questions")
+            
+            for _, row in filtered_qs.iterrows():
+                is_selected = select_all or st.checkbox(f"[{row['topic']}] {row['question'][:60]}... (By: {row['created_by']})", key=f"q_{row['id']}")
+                if is_selected:
+                    selected_q_ids.append(row["id"])
+
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("Import Selected Questions to Active Quiz 🚀"):
+                    selected_rows = filtered_qs[filtered_qs["id"].isin(selected_q_ids)]
+                    st.session_state.quiz_questions = []
+                    for _, row in selected_rows.iterrows():
+                        st.session_state.quiz_questions.append({
+                            "question": row["question"],
+                            "option_labels": json.loads(row["option_labels"]),
+                            "options": json.loads(row["options"]),
+                            "correct_idx": int(row["correct_idx"]),
+                            "image_base64": row.get("image_base64")
+                        })
+                    st.session_state.current_q_idx = 0
+                    st.success(f"Imported {len(selected_rows)} questions into active quiz session!")
+            with col_btn2:
+                if st.button("Import Entire Topic in Bulk 📦"):
+                    st.session_state.quiz_questions = []
+                    for _, row in filtered_qs.iterrows():
+                        st.session_state.quiz_questions.append({
+                            "question": row["question"],
+                            "option_labels": json.loads(row["option_labels"]),
+                            "options": json.loads(row["options"]),
+                            "correct_idx": int(row["correct_idx"]),
+                            "image_base64": row.get("image_base64")
+                        })
+                    st.session_state.current_q_idx = 0
+                    st.success(f"Imported all {len(filtered_qs)} questions in bulk!")
         else:
             st.info("No questions stored in database yet.")
 
     conn.close()
 
 # ------------------------------------------
-# TAB 3: STUDENT PORTAL & LIVE QUIZ
+# TAB 3: IMAGE/PDF QUIZ CREATOR
+# ------------------------------------------
+with tab_media_quiz:
+    st.header("📷 Form Quiz via Images (JPG/PNG) or PDF Upload")
+    st.markdown("Upload files, specify options/answers, and form a disposable/exportable quiz session.")
+
+    uploaded_files = st.file_uploader("Upload Question Images or PDF", type=["jpg", "jpeg", "png", "pdf"], accept_multiple_files=True)
+
+    if uploaded_files:
+        st.subheader("Define Options & Correct Answers for Uploaded Media")
+        media_questions = []
+
+        for idx, file in enumerate(uploaded_files):
+            st.markdown(f"**Media Item {idx+1}: {file.name}**")
+            
+            # Read Image/PDF Bytes
+            file_bytes = file.read()
+            base64_str = base64.b64encode(file_bytes).decode("utf-8")
+            
+            col_m1, col_m2 = st.columns([1, 1])
+            with col_m1:
+                if file.type.startswith("image"):
+                    st.image(file_bytes, use_container_width=True)
+                elif file.type == "application/pdf":
+                    st.info("📄 PDF File Uploaded.")
+
+            with col_m2:
+                q_title = st.text_input(f"Question Title/Prompt #{idx+1}:", value=f"Identify/Solve Question {idx+1}", key=f"media_q_{idx}")
+                op_a = st.text_input("Option A:", value="Option A", key=f"med_a_{idx}")
+                op_b = st.text_input("Option B:", value="Option B", key=f"med_b_{idx}")
+                op_c = st.text_input("Option C:", value="Option C", key=f"med_c_{idx}")
+                op_d = st.text_input("Option D:", value="Option D", key=f"med_d_{idx}")
+                corr_i = st.selectbox("Correct Option:", [0, 1, 2, 3], format_func=lambda x: f"Option {chr(65+x)}", key=f"med_corr_{idx}")
+
+                media_questions.append({
+                    "question": q_title,
+                    "option_labels": ["Option A", "Option B", "Option C", "Option D"],
+                    "options": [op_a, op_b, op_c, op_d],
+                    "correct_idx": corr_i,
+                    "image_base64": base64_str if file.type.startswith("image") else None
+                })
+            st.markdown("---")
+
+        if st.button("Form Quiz from Media Uploads 🚀"):
+            st.session_state.quiz_questions = media_questions
+            st.session_state.current_q_idx = 0
+            st.success("Media quiz formed and loaded into active session!")
+
+# ------------------------------------------
+# TAB 4: LIVE CONTROL & DISCARD/DOWNLOAD QUIZ
 # ------------------------------------------
 with tab_portal:
+    st.header("📲 Live Quiz Control & Management")
+
+    # Quiz Export & Discard Management
+    if st.session_state.quiz_questions:
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            # Download Full Quiz Data
+            quiz_export_data = json.dumps(st.session_state.quiz_questions, indent=2)
+            st.download_button(
+                label="📥 Download Full Quiz (JSON)",
+                data=quiz_export_data,
+                file_name="full_quiz_export.json",
+                mime="application/json"
+            )
+        with col_ex2:
+            if st.button("🗑️ Discard Complete Quiz Session"):
+                st.session_state.quiz_questions = []
+                st.session_state.responses = []
+                st.session_state.current_q_idx = 0
+                st.success("Quiz completely discarded!")
+                st.rerun()
+
+    st.markdown("---")
+
     if not st.session_state.quiz_questions:
-        st.warning("No active quiz questions! Go to 'Topic-Wise Question Bank DB' tab and import questions to start.")
+        st.warning("No active quiz running.")
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
-        with st.container():
-            st.markdown('<div class="question-marker"></div>', unsafe_allow_html=True)
-            st.markdown(f"### Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}")
-            st.markdown(f"**{curr_q['question']}**")
+        # ENRICHED FONT SIZE & UNIFIED QUESTION AND OPTIONS BOX
+        st.markdown(f"""
+        <div class="unified-question-box">
+            <h2>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</h2>
+            <h3>{curr_q['question']}</h3>
+            <hr style="border-color: #818CF8;">
+            <p><strong>Option A:</strong> {curr_q['options'][0]}</p>
+            <p><strong>Option B:</strong> {curr_q['options'][1]}</p>
+            <p><strong>Option C:</strong> {curr_q['options'][2]}</p>
+            <p><strong>Option D:</strong> {curr_q['options'][3]}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if curr_q.get("image_base64"):
+            st.image(f"data:image/png;base64,{curr_q['image_base64']}", width=400)
 
         # Navigation Controls
         col_nav1, col_nav2, col_nav3 = st.columns(3)
@@ -338,69 +626,13 @@ with tab_portal:
                 st.session_state.quiz_ended = True
                 st.rerun()
 
-        st.markdown("---")
-        
-        # Student Voting Interface
-        col_stu_input, col_sim = st.columns([1.2, 1])
-        
-        with col_stu_input:
-            st.subheader("📲 Submit Student Response")
-            student_roll = st.text_input("Roll Number:", value="2026_STEM_001")
-            
-            assigned_group = "Unassigned"
-            for grp, members in st.session_state.groups.items():
-                if student_roll in members:
-                    assigned_group = grp
-                    break
-                    
-            st.info(f"**Assigned Group:** {assigned_group}")
-            
-            choices = [f"**{curr_q['option_labels'][i]}:** {curr_q['options'][i]}" for i in range(len(curr_q['options']))]
-            
-            selected_idx = st.radio(
-                label="Options", options=range(len(choices)), 
-                format_func=lambda x: choices[x], label_visibility="collapsed"
-            )
-            
-            if st.button("Submit Vote 🚀"):
-                if assigned_group == "Unassigned":
-                    st.error("Form/load classroom groups first!")
-                else:
-                    st.session_state.responses.append({
-                        "Q_Idx": st.session_state.current_q_idx,
-                        "Roll_No": student_roll,
-                        "Group": assigned_group,
-                        "Option_Index": selected_idx,
-                        "Label": curr_q['option_labels'][selected_idx]
-                    })
-                    st.success("Response recorded in database session!")
-
-        with col_sim:
-            st.subheader("⚡ Simulation Tool")
-            if st.button("Simulate Random Class Responses"):
-                if not st.session_state.groups:
-                    st.warning("Form/load classroom groups first!")
-                else:
-                    for grp, members in st.session_state.groups.items():
-                        for student in members:
-                            rand_idx = random.randint(0, len(curr_q['options']) - 1)
-                            st.session_state.responses.append({
-                                "Q_Idx": st.session_state.current_q_idx,
-                                "Roll_No": student,
-                                "Group": grp,
-                                "Option_Index": rand_idx,
-                                "Label": curr_q['option_labels'][rand_idx]
-                            })
-                    st.rerun()
-
 # ------------------------------------------
-# TAB 4: LIVE ANALYTICS & LEADERBOARD
+# TAB 5: ANALYTICS & INDIVIDUAL GROUP PIE CHARTS
 # ------------------------------------------
 with tab_analytics:
     # WINNER DECLARATION
     if st.session_state.quiz_ended:
         st.balloons()
-        
         scores = {grp: 0 for grp in st.session_state.groups.keys()}
         df_all = pd.DataFrame(st.session_state.responses)
         
@@ -425,7 +657,6 @@ with tab_analytics:
         </div>
         """, unsafe_allow_html=True)
 
-    # LIVE POLL ANALYTICS
     st.markdown(f"## 📊 Live Poll Analytics")
     
     if not st.session_state.quiz_questions:
@@ -435,18 +666,12 @@ with tab_analytics:
         df_curr = df_resp[df_resp["Q_Idx"] == st.session_state.current_q_idx] if not df_resp.empty and "Q_Idx" in df_resp.columns else pd.DataFrame()
         
         if df_curr.empty:
-            st.warning("Awaiting responses for the current question...")
+            st.warning("Awaiting responses for current question...")
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
             total_votes = len(df_curr)
             
-            col_m1, col_m2 = st.columns([1, 4])
-            with col_m1:
-                st.metric("Total Votes", total_votes)
-            with col_m2:
-                st.markdown(f"**Question:** {curr_q['question']}")
-
-            st.markdown("---")
+            st.metric("Total Votes Received", total_votes)
 
             def get_highlight_colors(values, default_color="#3B82F6", max_color="#10B981"):
                 if not values or max(values) == 0:
@@ -472,6 +697,23 @@ with tab_analytics:
                                              marker_color=get_highlight_colors(y_counts), showlegend=False), row=r, col=c)
                     
                     fig.update_layout(template="plotly_dark", height=300 * rows)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            elif chart_type == "Individual Group Pie Charts":
+                unique_groups = sorted(list(st.session_state.groups.keys()))
+                if unique_groups:
+                    cols = 2
+                    rows = (len(unique_groups) + 1) // 2
+                    fig = make_subplots(rows=rows, cols=cols, subplot_titles=[f"Group: {g}" for g in unique_groups], specs=[[{"type": "domain"}]*cols]*rows)
+                    
+                    for idx, grp in enumerate(unique_groups):
+                        r, c = (idx // cols) + 1, (idx % cols) + 1
+                        grp_data = df_curr[df_curr["Group"] == grp]
+                        pie_counts = grp_data["Label"].value_counts()
+                        
+                        fig.add_trace(go.Pie(labels=pie_counts.index, values=pie_counts.values, name=grp), row=r, col=c)
+                    
+                    fig.update_layout(template="plotly_dark", height=350 * rows)
                     st.plotly_chart(fig, use_container_width=True)
 
             elif chart_type == "Overall Bar Chart":
