@@ -8,14 +8,6 @@ import string
 import sqlite3
 import json
 import base64
-from io import BytesIO
-
-# Try importing PyPDF2 for PDF processing
-try:
-    import PyPDF2
-    PDF_SUPPORT = True
-except ImportError:
-    PDF_SUPPORT = False
 
 # ==========================================
 # 1. PAGE CONFIGURATION & STYLING
@@ -38,7 +30,6 @@ st.markdown("""
         text-align: center;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     }
-    /* Unified Question Box Styling with Enriched Font Size */
     .unified-question-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 2px solid #818CF8;
@@ -76,7 +67,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. SQLITE DATABASE ENGINE & MIGRATION
+# 2. SQLITE DATABASE ENGINE
 # ==========================================
 DB_FILE = "quiz_system.db"
 
@@ -91,7 +82,6 @@ def init_db():
                 )''')
     # Default Teacher Account
     c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("teacher1", "admin123"))
-    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("teacher2", "admin123"))
 
     # Classrooms Table
     c.execute('''CREATE TABLE IF NOT EXISTS classrooms (
@@ -116,7 +106,7 @@ def init_db():
                     roll_no TEXT NOT NULL,
                     FOREIGN KEY(class_id) REFERENCES classrooms(id)
                 )''')
-    # Topic-wise Question Bank Table (Shared across all teachers)
+    # Topic-wise Question Bank Table (Shared)
     c.execute('''CREATE TABLE IF NOT EXISTS question_bank (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_by TEXT,
@@ -139,7 +129,7 @@ def get_db_connection():
 # 3. SESSION STATE INITIALIZATION
 # ==========================================
 if "user_role" not in st.session_state:
-    st.session_state.user_role = None  # Options: 'Teacher', 'Student'
+    st.session_state.user_role = None
 if "teacher_id" not in st.session_state:
     st.session_state.teacher_id = None
 if "username" not in st.session_state:
@@ -160,38 +150,78 @@ if "quiz_ended" not in st.session_state:
     st.session_state.quiz_ended = False
 
 # ==========================================
-# 4. LOGIN & ROLE SELECTION SYSTEM
+# 4. LOGIN & SIGN-UP SYSTEM
 # ==========================================
 if st.session_state.user_role is None:
     st.title("🧪 STEM Live Quiz Platform")
-    st.markdown("### Welcome! Please select your entry mode to continue:")
+    st.markdown("### Welcome! Select your role to continue:")
     
     col_login_t, col_login_s = st.columns(2)
 
     with col_login_t:
         st.subheader("👨‍🏫 Teacher Portal")
-        with st.form("teacher_login_form"):
-            t_user = st.text_input("Username", value="teacher1")
-            t_pass = st.text_input("Password", type="password", value="admin123")
-            submit_teacher = st.form_submit_button("Teacher Login 🔑")
+        
+        # Tabbed interface for Login vs Sign-Up
+        t_tab_login, t_tab_signup = st.tabs(["🔑 Teacher Login", "📝 New Teacher Sign-Up"])
 
-            if submit_teacher:
-                conn = get_db_connection()
-                c = conn.cursor()
-                c.execute("SELECT id, username FROM users WHERE username = ? AND password = ?", (t_user, t_pass))
-                user = c.fetchone()
-                conn.close()
-                if user:
-                    st.session_state.user_role = "Teacher"
-                    st.session_state.teacher_id = user[0]
-                    st.session_state.username = user[1]
-                    st.success(f"Welcome back, {user[1]}!")
-                    st.rerun()
-                else:
-                    st.error("Invalid Username or Password.")
+        # ----------------- TEACHER LOGIN -----------------
+        with t_tab_login:
+            with st.form("teacher_login_form"):
+                t_user = st.text_input("Username", value="teacher1")
+                t_pass = st.text_input("Password", type="password", value="admin123")
+                submit_teacher = st.form_submit_button("Login 🔑")
+
+                if submit_teacher:
+                    conn = get_db_connection()
+                    c = conn.cursor()
+                    c.execute("SELECT id, username FROM users WHERE username = ? AND password = ?", (t_user, t_pass))
+                    user = c.fetchone()
+                    conn.close()
+                    if user:
+                        st.session_state.user_role = "Teacher"
+                        st.session_state.teacher_id = user[0]
+                        st.session_state.username = user[1]
+                        st.success(f"Welcome back, {user[1]}!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid Username or Password.")
+
+        # ----------------- TEACHER SIGN-UP -----------------
+        with t_tab_signup:
+            with st.form("teacher_signup_form"):
+                new_user = st.text_input("Choose Username")
+                new_pass = st.text_input("Choose Password", type="password")
+                confirm_pass = st.text_input("Confirm Password", type="password")
+                submit_signup = st.form_submit_button("Create Teacher Account 🚀")
+
+                if submit_signup:
+                    if not new_user or not new_pass:
+                        st.error("Please fill out all fields.")
+                    elif new_pass != confirm_pass:
+                        st.error("Passwords do not match!")
+                    else:
+                        conn = get_db_connection()
+                        c = conn.cursor()
+                        try:
+                            c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (new_user, new_pass))
+                            conn.commit()
+                            # Fetch newly created user ID
+                            c.execute("SELECT id, username FROM users WHERE username = ?", (new_user,))
+                            user = c.fetchone()
+                            conn.close()
+
+                            # Auto-login after successful registration
+                            st.session_state.user_role = "Teacher"
+                            st.session_state.teacher_id = user[0]
+                            st.session_state.username = user[1]
+                            st.success("Account created successfully! Logging you in...")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            conn.close()
+                            st.error("Username already exists! Please choose another username.")
 
     with col_login_s:
-        st.subheader("🎓 Student Portal (Join via Session Code)")
+        st.subheader("🎓 Student Portal")
         with st.form("student_code_form"):
             entered_code = st.text_input("Enter 6-Digit Session Code:")
             submit_student = st.form_submit_button("Join Live Quiz 🚀")
@@ -199,10 +229,10 @@ if st.session_state.user_role is None:
             if submit_student:
                 if entered_code.strip().upper() == st.session_state.quiz_code:
                     st.session_state.user_role = "Student"
-                    st.success("Session Code Verified! Redirecting to Quiz...")
+                    st.success("Session Code Verified!")
                     st.rerun()
                 else:
-                    st.error("Invalid Session Code! Please check with your teacher.")
+                    st.error("Invalid Session Code!")
     st.stop()
 
 # ==========================================
@@ -229,7 +259,6 @@ if st.session_state.user_role == "Student":
         selected_student = st.selectbox("Select Your Roll Number & Name:", students_list)
         student_roll = selected_student.split(" - ")[0] if selected_student else ""
 
-    # Fetch Group Assignment
     assigned_group = "Unassigned"
     if selected_class_id and student_roll:
         grp_df = pd.read_sql("SELECT group_name FROM student_groups WHERE class_id = ? AND roll_no = ?", conn, params=(selected_class_id, student_roll))
@@ -241,13 +270,11 @@ if st.session_state.user_role == "Student":
 
     st.markdown("---")
 
-    # Display Active Quiz Question
     if not st.session_state.quiz_questions:
         st.warning("Waiting for teacher to start/import quiz questions...")
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
-        # Enriched Font & Unified Question Box
         st.markdown(f"""
         <div class="unified-question-box">
             <h2>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</h2>
@@ -258,7 +285,6 @@ if st.session_state.user_role == "Student":
         if curr_q.get("image_base64"):
             st.image(f"data:image/png;base64,{curr_q['image_base64']}", use_container_width=True)
 
-        # Options Inside Unified Block Framework
         choices = [f"**{curr_q['option_labels'][i]}:** {curr_q['options'][i]}" for i in range(len(curr_q['options']))]
         selected_idx = st.radio("Choose Option:", options=range(len(choices)), format_func=lambda x: choices[x])
 
@@ -319,7 +345,7 @@ tab_class_db, tab_q_db, tab_media_quiz, tab_portal, tab_analytics = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: TEACHER PRIVATE CLASSROOM & GROUPS
+# TAB 1: PRIVATE CLASSROOM & GROUPS
 # ------------------------------------------
 with tab_class_db:
     st.header(f"🗄️ Private Classroom Roster — {st.session_state.username}")
@@ -340,7 +366,6 @@ with tab_class_db:
                 except sqlite3.IntegrityError:
                     st.error("Classroom name error!")
 
-        # Load ONLY classrooms owned by logged in teacher
         classes_df = pd.read_sql("SELECT * FROM classrooms WHERE teacher_id = ?", conn, params=(st.session_state.teacher_id,))
         if not classes_df.empty:
             selected_class_name = st.selectbox("Select Active Private Classroom:", classes_df["class_name"].tolist())
@@ -414,7 +439,6 @@ with tab_class_db:
                     st.session_state.groups = {}
                     st.warning("Groups dissolved for this classroom.")
 
-            # Load Saved Groups
             saved_grps = pd.read_sql(
                 "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?", 
                 conn, params=(st.session_state.active_class_id,)
@@ -427,10 +451,10 @@ with tab_class_db:
     conn.close()
 
 # ------------------------------------------
-# TAB 2: SHARED QUESTION BANK DB & BULK CHECKBOXES
+# TAB 2: SHARED QUESTION BANK DB
 # ------------------------------------------
 with tab_q_db:
-    st.header("📚 Shared Question Bank DB (Contribute & Select)")
+    st.header("📚 Shared Question Bank DB")
     conn = get_db_connection()
 
     col_q1, col_q2 = st.columns([1, 1.2])
@@ -459,7 +483,7 @@ with tab_q_db:
             st.success("Question saved to shared database!")
 
     with col_q2:
-        st.subheader("2. Select Individual/Bulk Questions for Quiz")
+        st.subheader("2. Select Questions for Quiz")
         q_bank_df = pd.read_sql("SELECT * FROM question_bank", conn)
         
         if not q_bank_df.empty:
@@ -468,11 +492,7 @@ with tab_q_db:
             
             filtered_qs = q_bank_df if selected_topic == "All Topics" else q_bank_df[q_bank_df["topic"] == selected_topic]
             
-            # Checkbox Selection System
-            st.write("Select questions using checkboxes below:")
             selected_q_ids = []
-            
-            # Master Select All
             select_all = st.checkbox("Select All Filtered Questions")
             
             for _, row in filtered_qs.iterrows():
@@ -482,7 +502,7 @@ with tab_q_db:
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("Import Selected Questions to Active Quiz 🚀"):
+                if st.button("Import Selected Questions 🚀"):
                     selected_rows = filtered_qs[filtered_qs["id"].isin(selected_q_ids)]
                     st.session_state.quiz_questions = []
                     for _, row in selected_rows.iterrows():
@@ -517,19 +537,15 @@ with tab_q_db:
 # TAB 3: IMAGE/PDF QUIZ CREATOR
 # ------------------------------------------
 with tab_media_quiz:
-    st.header("📷 Form Quiz via Images (JPG/PNG) or PDF Upload")
-    st.markdown("Upload files, specify options/answers, and form a disposable/exportable quiz session.")
-
+    st.header("📷 Form Quiz via Images or PDF Upload")
     uploaded_files = st.file_uploader("Upload Question Images or PDF", type=["jpg", "jpeg", "png", "pdf"], accept_multiple_files=True)
 
     if uploaded_files:
-        st.subheader("Define Options & Correct Answers for Uploaded Media")
+        st.subheader("Define Options & Correct Answers")
         media_questions = []
 
         for idx, file in enumerate(uploaded_files):
             st.markdown(f"**Media Item {idx+1}: {file.name}**")
-            
-            # Read Image/PDF Bytes
             file_bytes = file.read()
             base64_str = base64.b64encode(file_bytes).decode("utf-8")
             
@@ -541,7 +557,7 @@ with tab_media_quiz:
                     st.info("📄 PDF File Uploaded.")
 
             with col_m2:
-                q_title = st.text_input(f"Question Title/Prompt #{idx+1}:", value=f"Identify/Solve Question {idx+1}", key=f"media_q_{idx}")
+                q_title = st.text_input(f"Question Title #{idx+1}:", value=f"Solve Question {idx+1}", key=f"media_q_{idx}")
                 op_a = st.text_input("Option A:", value="Option A", key=f"med_a_{idx}")
                 op_b = st.text_input("Option B:", value="Option B", key=f"med_b_{idx}")
                 op_c = st.text_input("Option C:", value="Option C", key=f"med_c_{idx}")
@@ -563,16 +579,14 @@ with tab_media_quiz:
             st.success("Media quiz formed and loaded into active session!")
 
 # ------------------------------------------
-# TAB 4: LIVE CONTROL & DISCARD/DOWNLOAD QUIZ
+# TAB 4: LIVE CONTROL & DISCARD/DOWNLOAD
 # ------------------------------------------
 with tab_portal:
     st.header("📲 Live Quiz Control & Management")
 
-    # Quiz Export & Discard Management
     if st.session_state.quiz_questions:
         col_ex1, col_ex2 = st.columns(2)
         with col_ex1:
-            # Download Full Quiz Data
             quiz_export_data = json.dumps(st.session_state.quiz_questions, indent=2)
             st.download_button(
                 label="📥 Download Full Quiz (JSON)",
@@ -595,7 +609,6 @@ with tab_portal:
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
-        # ENRICHED FONT SIZE & UNIFIED QUESTION AND OPTIONS BOX
         st.markdown(f"""
         <div class="unified-question-box">
             <h2>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</h2>
@@ -611,7 +624,6 @@ with tab_portal:
         if curr_q.get("image_base64"):
             st.image(f"data:image/png;base64,{curr_q['image_base64']}", width=400)
 
-        # Navigation Controls
         col_nav1, col_nav2, col_nav3 = st.columns(3)
         with col_nav1:
             if st.button("⬅️ Previous Question") and st.session_state.current_q_idx > 0:
@@ -627,10 +639,9 @@ with tab_portal:
                 st.rerun()
 
 # ------------------------------------------
-# TAB 5: ANALYTICS & INDIVIDUAL GROUP PIE CHARTS
+# TAB 5: ANALYTICS & PIE CHARTS
 # ------------------------------------------
 with tab_analytics:
-    # WINNER DECLARATION
     if st.session_state.quiz_ended:
         st.balloons()
         scores = {grp: 0 for grp in st.session_state.groups.keys()}
