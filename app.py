@@ -73,7 +73,7 @@ conn = st.connection("supabase", type="sql")
 
 def init_db():
     with conn.session as s:
-        # Users Table (Teachers)
+        # Users Table (Default Single Teacher Setup)
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -81,10 +81,9 @@ def init_db():
                 password TEXT NOT NULL
             );
         """))
-        # Default Teacher Account
         s.execute(text("""
-            INSERT INTO users (username, password) 
-            VALUES ('teacher1', 'admin123') 
+            INSERT INTO users (id, username, password) 
+            VALUES (1, 'teacher1', 'admin123') 
             ON CONFLICT (username) DO NOTHING;
         """))
         # Classrooms Table
@@ -139,12 +138,12 @@ except Exception as e:
 # ==========================================
 # 3. SESSION STATE INITIALIZATION
 # ==========================================
-if "user_role" not in st.session_state:
-    st.session_state.user_role = None
-if "teacher_id" not in st.session_state:
-    st.session_state.teacher_id = None
-if "username" not in st.session_state:
-    st.session_state.username = None
+# Single teacher default settings
+st.session_state.teacher_id = 1
+st.session_state.username = "Teacher"
+
+if "is_student" not in st.session_state:
+    st.session_state.is_student = False
 if "quiz_code" not in st.session_state:
     st.session_state.quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 if "active_class_id" not in st.session_state:
@@ -161,81 +160,27 @@ if "quiz_ended" not in st.session_state:
     st.session_state.quiz_ended = False
 
 # ==========================================
-# 4. LOGIN & SIGN-UP SYSTEM
+# 4. STUDENT PORTAL GATEWAY
 # ==========================================
-if st.session_state.user_role is None:
-    st.title("🧪 STEM Live Quiz Platform")
-    st.markdown("### Welcome! Select your role to continue:")
-    
-    col_login_t, col_login_s = st.columns(2)
-
-    with col_login_t:
-        st.subheader("👨‍🏫 Teacher Portal")
-        t_tab_login, t_tab_signup = st.tabs(["🔑 Teacher Login", "📝 New Teacher Sign-Up"])
-
-        with t_tab_login:
-            with st.form("teacher_login_form"):
-                t_user = st.text_input("Username", value="teacher1")
-                t_pass = st.text_input("Password", type="password", value="admin123")
-                submit_teacher = st.form_submit_button("Login 🔑")
-
-                if submit_teacher:
-                    user_df = conn.query("SELECT id, username FROM users WHERE username = :u AND password = :p", params={"u": t_user, "p": t_pass})
-                    if not user_df.empty:
-                        st.session_state.user_role = "Teacher"
-                        st.session_state.teacher_id = int(user_df.iloc[0]["id"])
-                        st.session_state.username = str(user_df.iloc[0]["username"])
-                        st.success(f"Welcome back, {st.session_state.username}!")
-                        st.rerun()
-                    else:
-                        st.error("Invalid Username or Password.")
-
-        with t_tab_signup:
-            with st.form("teacher_signup_form"):
-                new_user = st.text_input("Choose Username")
-                new_pass = st.text_input("Choose Password", type="password")
-                confirm_pass = st.text_input("Confirm Password", type="password")
-                submit_signup = st.form_submit_button("Create Teacher Account 🚀")
-
-                if submit_signup:
-                    if not new_user or not new_pass:
-                        st.error("Please fill out all fields.")
-                    elif new_pass != confirm_pass:
-                        st.error("Passwords do not match!")
-                    else:
-                        try:
-                            with conn.session as s:
-                                s.execute(text("INSERT INTO users (username, password) VALUES (:u, :p)"), {"u": new_user, "p": new_pass})
-                                s.commit()
-                            
-                            user_df = conn.query("SELECT id, username FROM users WHERE username = :u", params={"u": new_user})
-                            st.session_state.user_role = "Teacher"
-                            st.session_state.teacher_id = int(user_df.iloc[0]["id"])
-                            st.session_state.username = str(user_df.iloc[0]["username"])
-                            st.success("Account created successfully!")
-                            st.rerun()
-                        except Exception:
-                            st.error("Username already exists! Please choose another.")
-
-    with col_login_s:
-        st.subheader("🎓 Student Portal")
+# Display code entry banner at top for student access
+if not st.session_state.is_student:
+    with st.expander("🎓 **Student Join Portal (Click here if you are a student)**", expanded=False):
         with st.form("student_code_form"):
             entered_code = st.text_input("Enter 6-Digit Session Code:")
             submit_student = st.form_submit_button("Join Live Quiz 🚀")
 
             if submit_student:
                 if entered_code.strip().upper() == st.session_state.quiz_code:
-                    st.session_state.user_role = "Student"
+                    st.session_state.is_student = True
                     st.success("Session Code Verified!")
                     st.rerun()
                 else:
                     st.error("Invalid Session Code!")
-    st.stop()
 
 # ==========================================
 # 5. STUDENT-ONLY INTERFACE
 # ==========================================
-if st.session_state.user_role == "Student":
+if st.session_state.is_student:
     st.title("📲 Student Live Poll Portal")
     
     classes_df = conn.query("SELECT * FROM classrooms")
@@ -295,19 +240,19 @@ if st.session_state.user_role == "Student":
                 })
                 st.success("Response recorded successfully!")
 
-    if st.sidebar.button("Logout Student"):
-        st.session_state.user_role = None
+    if st.sidebar.button("Exit Student Portal 🚪"):
+        st.session_state.is_student = False
         st.rerun()
     st.stop()
 
 # ==========================================
 # 6. TEACHER DASHBOARD & CONTROLS
 # ==========================================
-st.sidebar.title(f"👨‍🏫 {st.session_state.username}'s Dashboard")
+st.sidebar.title("👨‍🏫 Teacher Dashboard")
 
 st.sidebar.markdown(f"""
 <div class="metric-card">
-    <span style="color: #9CA3AF; font-size: 0.9em;">Session Code</span><br>
+    <span style="color: #9CA3AF; font-size: 0.9em;">Session Code for Students</span><br>
     <span style="color: #60A5FA; font-weight: bold; font-size: 2em; letter-spacing: 3px;">{st.session_state.quiz_code}</span>
 </div>
 """, unsafe_allow_html=True)
@@ -319,34 +264,32 @@ chart_type = st.sidebar.selectbox(
     ["Individual Group Histograms", "Individual Group Pie Charts", "Overall Bar Chart", "Overall Pie Chart", "Group Stacked Bar Chart"]
 )
 
-if st.sidebar.button("Logout Teacher 🚪"):
-    st.session_state.user_role = None
-    st.session_state.teacher_id = None
-    st.session_state.username = None
+if st.sidebar.button("Generate New Session Code 🔄"):
+    st.session_state.quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
     st.rerun()
 
 # ==========================================
 # 7. TEACHER TABS MANAGEMENT
 # ==========================================
-st.title("🧪 STEM Live Quiz & Private Class Manager")
+st.title("🧪 STEM Live Quiz & Classroom Management System")
 
 tab_class_db, tab_q_db, tab_media_quiz, tab_portal, tab_analytics = st.tabs([
-    "🏫 Classroom DB (Private)", 
-    "📚 Question Bank (Shared DB)", 
+    "🏫 Classroom DB", 
+    "📚 Question Bank", 
     "📷 Image/PDF Quiz Creator",
     "📲 Live Control", 
     "📺 Analytics & Leaderboard"
 ])
 
 # ------------------------------------------
-# TAB 1: PRIVATE CLASSROOM & GROUPS
+# TAB 1: CLASSROOM & GROUPS
 # ------------------------------------------
 with tab_class_db:
-    st.header(f"🗄️ Private Classroom Roster — {st.session_state.username}")
+    st.header("🗄️ Classroom Roster")
     col_c1, col_c2 = st.columns([1, 1])
 
     with col_c1:
-        st.subheader("1. Create / Select Private Classroom")
+        st.subheader("1. Create / Select Classroom")
         new_class = st.text_input("New Classroom Name (e.g., 'Physics 10B'):")
         if st.button("Create Classroom ➕"):
             if new_class:
@@ -354,11 +297,11 @@ with tab_class_db:
                     s.execute(text("INSERT INTO classrooms (teacher_id, class_name) VALUES (:t_id, :c_name)"), 
                               {"t_id": st.session_state.teacher_id, "c_name": new_class})
                     s.commit()
-                st.success(f"Private Classroom '{new_class}' created!")
+                st.success(f"Classroom '{new_class}' created!")
 
         classes_df = conn.query("SELECT * FROM classrooms WHERE teacher_id = :t_id", params={"t_id": st.session_state.teacher_id})
         if not classes_df.empty:
-            selected_class_name = st.selectbox("Select Active Private Classroom:", classes_df["class_name"].tolist())
+            selected_class_name = st.selectbox("Select Active Classroom:", classes_df["class_name"].tolist())
             selected_class_row = classes_df[classes_df["class_name"] == selected_class_name].iloc[0]
             st.session_state.active_class_id = int(selected_class_row["id"])
             
@@ -380,7 +323,7 @@ with tab_class_db:
                                 s.execute(text("INSERT INTO students (class_id, roll_no, name) VALUES (:c_id, :r_no, :name)"), 
                                           {"c_id": st.session_state.active_class_id, "r_no": str(row[r_col]), "name": str(row[n_col])})
                             s.commit()
-                        st.success("Uploaded and saved students into private classroom!")
+                        st.success("Uploaded and saved students into classroom!")
                     else:
                         st.error("CSV must contain 'Roll_No' and 'Name' headers!")
             else:
@@ -437,14 +380,14 @@ with tab_class_db:
                 st.json(st.session_state.groups)
 
 # ------------------------------------------
-# TAB 2: SHARED QUESTION BANK DB
+# TAB 2: QUESTION BANK DB
 # ------------------------------------------
 with tab_q_db:
-    st.header("📚 Shared Question Bank DB")
+    st.header("📚 Question Bank DB")
     col_q1, col_q2 = st.columns([1, 1.2])
 
     with col_q1:
-        st.subheader("1. Add Question to Shared DB")
+        st.subheader("1. Add Question to DB")
         q_topic = st.text_input("Topic Name:", value="Linear Algebra")
         q_text = st.text_area("Question Text (LaTeX Supported):", value=r"Eigenvalues of $A = \begin{bmatrix} 2 & 2 \\ 0 & 3 \end{bmatrix}$ are:")
         
@@ -458,7 +401,7 @@ with tab_q_db:
 
         correct_op = st.selectbox("Correct Option Index:", [0, 1, 2, 3], format_func=lambda x: f"Option {chr(65+x)}")
 
-        if st.button("Contribute Question to Shared DB 💾"):
+        if st.button("Save Question to DB 💾"):
             with conn.session as s:
                 s.execute(text("""
                     INSERT INTO question_bank (created_by, topic, question, option_labels, options, correct_idx) 
@@ -472,7 +415,7 @@ with tab_q_db:
                     "correct_idx": correct_op
                 })
                 s.commit()
-            st.success("Question saved to shared database!")
+            st.success("Question saved to database!")
 
     with col_q2:
         st.subheader("2. Select Questions for Quiz")
@@ -488,7 +431,7 @@ with tab_q_db:
             select_all = st.checkbox("Select All Filtered Questions")
             
             for _, row in filtered_qs.iterrows():
-                is_selected = select_all or st.checkbox(f"[{row['topic']}] {row['question'][:60]}... (By: {row['created_by']})", key=f"q_{row['id']}")
+                is_selected = select_all or st.checkbox(f"[{row['topic']}] {row['question'][:60]}...", key=f"q_{row['id']}")
                 if is_selected:
                     selected_q_ids.append(row["id"])
 
@@ -569,7 +512,7 @@ with tab_media_quiz:
             st.success("Media quiz formed and loaded into active session!")
 
 # ------------------------------------------
-# TAB 4: LIVE CONTROL & DISCARD/DOWNLOAD
+# TAB 4: LIVE CONTROL
 # ------------------------------------------
 with tab_portal:
     st.header("📲 Live Quiz Control & Management")
