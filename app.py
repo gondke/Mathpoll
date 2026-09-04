@@ -32,79 +32,13 @@ st.markdown(
         margin-bottom: 20px;
     }
 
-    /* Live Classroom Projection Box */
-    .classroom-projection-box {
-        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
-        border: 3px solid #38BDF8;
-        border-radius: 20px;
-        padding: 35px;
-        margin-top: 10px;
-        margin-bottom: 25px;
-        box-shadow: 0px 10px 30px rgba(56, 189, 248, 0.2);
-    }
-    
-    .projection-topic-badge {
-        background-color: #0284C7;
-        color: #FFFFFF;
-        padding: 6px 16px;
-        border-radius: 20px;
-        font-size: 1.1rem;
-        font-weight: 600;
-        display: inline-block;
-        margin-bottom: 15px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    .projection-question-title {
-        color: #F8FAFC;
-        font-size: 2.2rem;
-        font-weight: 700;
-        line-height: 1.4;
-        margin-bottom: 30px;
-        border-bottom: 2px solid #334155;
-        padding-bottom: 20px;
-    }
-
-    .projection-options-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 20px;
-    }
-
-    .projection-option-card {
+    /* Live Classroom Projection Card Container */
+    .option-card-wrapper {
         background-color: #1E293B;
         border: 2px solid #475569;
         border-radius: 12px;
-        padding: 18px 24px;
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #E2E8F0;
-        display: flex;
-        align-items: center;
-        transition: all 0.3s ease;
-    }
-
-    .projection-option-label {
-        background-color: #3B82F6;
-        color: #FFFFFF;
-        border-radius: 8px;
-        padding: 4px 14px;
-        margin-right: 16px;
-        font-size: 1.4rem;
-        font-weight: 800;
-    }
-
-    @media (max-width: 900px) {
-        .projection-options-grid {
-            grid-template-columns: 1fr;
-        }
-        .projection-question-title {
-            font-size: 1.6rem;
-        }
-        .projection-option-card {
-            font-size: 1.2rem;
-        }
+        padding: 15px 20px;
+        margin-bottom: 15px;
     }
 </style>
 """,
@@ -285,15 +219,8 @@ elif st.session_state.user_role == "student":
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
-        st.markdown(
-            f"""
-            <div class="question-box">
-                <h4>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</h4>
-                <h3>{curr_q['question']}</h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"#### Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}")
+        st.write(f"### {curr_q['question']}")
 
         choices = [
             f"{curr_q['option_labels'][i]}: {curr_q['options'][i]}"
@@ -378,7 +305,7 @@ elif st.session_state.user_role == "teacher":
                 if st.button("Create Classroom ➕") and new_class:
                     try:
                         conn.execute(
-                            "INSERT INTO classrooms (class_name) VALUES (?)" , (new_class,)
+                            "INSERT INTO classrooms (class_name) VALUES (?)", (new_class,)
                         )
                         conn.commit()
                         st.success(f"Classroom '{new_class}' created!")
@@ -456,8 +383,8 @@ elif st.session_state.user_role == "teacher":
 
             with col_q1:
                 st.subheader("1. Add Question to Database")
-                q_topic = st.text_input("Topic Name:", value="Linear Algebra")
-                q_text = st.text_area("Question Text:", value=r"Eigenvalues of matrix $A$ are:")
+                q_topic = st.text_input("Topic Name:", value="Differential Equations")
+                q_text = st.text_area("Question Text:", value=r"Laplace Transform of $e^{3t}$ is:")
 
                 fmt_choice = st.selectbox(
                     "Select Option Labeling Style:",
@@ -467,11 +394,11 @@ elif st.session_state.user_role == "teacher":
 
                 col_op1, col_op2 = st.columns(2)
                 with col_op1:
-                    op_a = st.text_input(f"{selected_labels[0]}:", value=r"$\lambda_1 = 2, \lambda_2 = 3$")
-                    op_b = st.text_input(f"{selected_labels[1]}:", value=r"$\lambda_1 = 0, \lambda_2 = 2$")
+                    op_a = st.text_input(f"{selected_labels[0]}:", value=r"$\frac{1}{s+3}$")
+                    op_b = st.text_input(f"{selected_labels[1]}:", value=r"$\frac{1}{s-3}$")
                 with col_op2:
-                    op_c = st.text_input(f"{selected_labels[2]}:", value=r"$\lambda_1 = 1, \lambda_2 = 3$")
-                    op_d = st.text_input(f"{selected_labels[3]}:", value=r"$\lambda_1 = -2, \lambda_2 = -3$")
+                    op_c = st.text_input(f"{selected_labels[2]}:", value=r"$\frac{s}{s-3}$")
+                    op_d = st.text_input(f"{selected_labels[3]}:", value=r"$\frac{s}{s+3}$")
 
                 correct_op = st.selectbox(
                     "Correct Option:",
@@ -577,33 +504,34 @@ elif st.session_state.user_role == "teacher":
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
             q_topic = curr_q.get("topic", "General")
             
-            # Classroom-Ready Single Display Box HTML Construction
-            options_html = ""
-            for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
-                options_html += f"""
-                <div class="projection-option-card">
-                    <span class="projection-option-label">{label}</span>
-                    <span>{opt_text}</span>
-                </div>
-                """
+            # Classroom Big Single Container Box
+            with st.container(border=True):
+                # Header Badge & Question counter
+                col_badge, col_count = st.columns([1, 1])
+                with col_badge:
+                    st.markdown(f"#### 📌 `{q_topic.upper()}`")
+                with col_count:
+                    st.markdown(f"<div style='text-align: right; color: #94A3B8; font-weight: bold; font-size: 1.2rem;'>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</div>", unsafe_allow_html=True)
 
-            projection_box_html = f"""
-            <div class="classroom-projection-box">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <span class="projection-topic-badge">📌 {q_topic}</span>
-                    <span style="font-size: 1.3rem; font-weight: bold; color: #94A3B8;">
-                        Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}
-                    </span>
-                </div>
-                <div class="projection-question-title">{curr_q['question']}</div>
-                <div class="projection-options-grid">
-                    {options_html}
-                </div>
-            </div>
-            """
+                st.markdown("---")
 
-            # Render Projection Display Box
-            st.markdown(projection_box_html, unsafe_allow_html=True)
+                # Big Native Math/LaTeX Question Display
+                st.write(f"# {curr_q['question']}")
+
+                st.markdown("---")
+
+                # Options rendered in 2x2 Big Grid using Native LaTeX processing
+                col1, col2 = st.columns(2)
+                
+                for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
+                    target_col = col1 if idx % 2 == 0 else col2
+                    
+                    with target_col:
+                        with st.container(border=True):
+                            st.write(f"### **{label}**")
+                            st.write(f"## {opt_text}")
+
+            st.markdown("<br>", unsafe_allow_html=True)
 
             # Controller Toolbar
             col_nav1, col_nav2, col_nav3 = st.columns([1, 1, 1])
