@@ -407,14 +407,8 @@ elif st.session_state.user_role == "teacher":
                         conn,
                         params=(st.session_state.active_class_id,),
                     )
-                    
-                    st.markdown("**Enrolled Students:**")
-                    st.dataframe(students_in_class, height=180, use_container_width=True)
 
                     if not students_in_class.empty:
-                        all_student_rolls = (students_in_class["roll_no"] + " (" + students_in_class["name"] + ")").tolist()
-                        roll_map = dict(zip(all_student_rolls, students_in_class["roll_no"]))
-
                         existing_groups_df = pd.read_sql(
                             "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?",
                             conn,
@@ -427,7 +421,7 @@ elif st.session_state.user_role == "teacher":
                                 use_container_width=True
                             )
 
-                        group_method = st.radio("Group Formation Mode:", ["Auto-Form Groups", "Manual Group Assignment"], horizontal=True)
+                        group_method = st.radio("Group Formation Mode:", ["Manual Checkbox Selection", "Auto-Form Groups"], horizontal=True)
 
                         if group_method == "Auto-Form Groups":
                             num_g = st.number_input("Number of Groups", min_value=2, max_value=10, value=4)
@@ -449,14 +443,38 @@ elif st.session_state.user_role == "teacher":
                                 st.rerun()
 
                         else:
-                            st.markdown("#### Manual Group Creation")
-                            manual_grp_name = st.text_input("Group Name:", value="Group A")
-                            selected_students_labels = st.multiselect("Select Students for this Group:", options=all_student_rolls)
-                            selected_rolls = [roll_map[lbl] for lbl in selected_students_labels]
+                            st.markdown("**Enrolled Students Checkbox Selection:**")
+                            st.caption("Tick the checkboxes next to the students you want to assign to a group.")
+                            
+                            students_editor_df = students_in_class.copy()
+                            students_editor_df.insert(0, "Select", False)
 
+                            edited_roster = st.data_editor(
+                                students_editor_df,
+                                column_config={
+                                    "Select": st.column_config.CheckboxColumn(
+                                        "Select",
+                                        help="Tick to add to group",
+                                        default=False,
+                                    ),
+                                    "roll_no": "Roll Number",
+                                    "name": "Student Name",
+                                },
+                                disabled=["roll_no", "name"],
+                                hide_index=True,
+                                use_container_width=True,
+                                height=250,
+                            )
+
+                            selected_rolls = edited_roster[edited_roster["Select"] == True]["roll_no"].astype(str).tolist()
+
+                            col_mg1, col_mg2 = st.columns([1.5, 1])
+                            with col_mg1:
+                                manual_grp_name = st.text_input("Assign to Group Name:", value="Group A")
+                            
                             col_m1, col_m2 = st.columns(2)
                             with col_m1:
-                                if st.button("Save Manual Group 💾"):
+                                if st.button("Save Selected to Group 💾", use_container_width=True):
                                     if manual_grp_name and selected_rolls:
                                         conn.execute(
                                             "DELETE FROM student_groups WHERE class_id = ? AND (group_name = ? OR roll_no IN ({}))".format(
@@ -467,20 +485,22 @@ elif st.session_state.user_role == "teacher":
                                         for r_no in selected_rolls:
                                             conn.execute(
                                                 "INSERT INTO student_groups (class_id, group_name, roll_no) VALUES (?, ?, ?)",
-                                                (st.session_state.active_class_id, manual_grp_name, r_no),
+                                                (st.session_state.active_class_id, manual_grp_name, str(r_no)),
                                             )
                                         conn.commit()
-                                        st.success(f"Saved '{manual_grp_name}' with {len(selected_rolls)} members!")
+                                        st.success(f"Assigned {len(selected_rolls)} student(s) to '{manual_grp_name}'!")
                                         st.rerun()
                                     else:
-                                        st.warning("Provide group name and select at least one student.")
+                                        st.warning("Ensure group name is given and at least one student checkbox is ticked.")
                             
                             with col_m2:
-                                if st.button("Reset All Groups 🧹"):
+                                if st.button("Reset All Groups 🧹", use_container_width=True):
                                     conn.execute("DELETE FROM student_groups WHERE class_id = ?", (st.session_state.active_class_id,))
                                     conn.commit()
-                                    st.success("Cleared group configurations.")
+                                    st.success("Cleared all group assignments.")
                                     st.rerun()
+                    else:
+                        st.info("No students enrolled in this classroom yet.")
 
     # --- TAB 2: TOPIC-WISE QUESTION BANK DB ---
     with tab_q_db:
