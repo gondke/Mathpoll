@@ -32,7 +32,7 @@ st.markdown(
         margin-bottom: 20px;
     }
 
-    /* Live Classroom Projection Card Container */
+    /* Option Card Containers */
     .option-card-wrapper {
         background-color: #1E293B;
         border: 2px solid #475569;
@@ -124,6 +124,8 @@ if "current_q_idx" not in st.session_state:
     st.session_state.current_q_idx = 0
 if "quiz_ended" not in st.session_state:
     st.session_state.quiz_ended = False
+if "show_correct_answer" not in st.session_state:
+    st.session_state.show_correct_answer = False
 
 def validate_session_code(code):
     clean_code = code.strip().upper()
@@ -474,6 +476,7 @@ elif st.session_state.user_role == "teacher":
                                     })
                                 st.session_state.current_q_idx = 0
                                 st.session_state.responses = []
+                                st.session_state.show_correct_answer = False
                                 st.success(f"Imported {len(selected_ids)} questions to active quiz!")
 
                     with col_btn2:
@@ -489,6 +492,7 @@ elif st.session_state.user_role == "teacher":
                                 })
                             st.session_state.current_q_idx = 0
                             st.session_state.responses = []
+                            st.session_state.show_correct_answer = False
                             st.success(f"Imported all {len(filtered_qs)} filtered questions!")
 
                 else:
@@ -503,6 +507,7 @@ elif st.session_state.user_role == "teacher":
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
             q_topic = curr_q.get("topic", "General")
+            correct_idx = curr_q.get("correct_idx", 0)
             
             # Classroom Big Single Container Box
             with st.container(border=True):
@@ -525,26 +530,59 @@ elif st.session_state.user_role == "teacher":
                 
                 for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
                     target_col = col1 if idx % 2 == 0 else col2
+                    is_correct = (idx == correct_idx) and st.session_state.show_correct_answer
                     
                     with target_col:
-                        with st.container(border=True):
-                            st.write(f"### **{label}**")
+                        if is_correct:
+                            # Highlighted Correct Answer styling
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    background-color: #064E3B;
+                                    border: 3px solid #059669;
+                                    border-radius: 12px;
+                                    padding: 15px 20px;
+                                    margin-bottom: 15px;
+                                    box-shadow: 0 0 15px rgba(5, 150, 105, 0.4);
+                                ">
+                                    <h3 style="margin: 0; color: #34D399;">{label} (Correct Answer ✅)</h3>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
                             st.write(f"## {opt_text}")
+                        else:
+                            # Standard Card Container
+                            with st.container(border=True):
+                                st.write(f"### **{label}**")
+                                st.write(f"## {opt_text}")
 
             st.markdown("<br>", unsafe_allow_html=True)
 
             # Controller Toolbar
-            col_nav1, col_nav2, col_nav3 = st.columns([1, 1, 1])
+            col_nav1, col_nav2, col_nav3, col_nav4 = st.columns([1, 1.2, 1, 1])
+            
             with col_nav1:
-                if st.button("⬅️ Previous Question", use_container_width=True) and st.session_state.current_q_idx > 0:
+                if st.button("⬅️ Previous", use_container_width=True) and st.session_state.current_q_idx > 0:
                     st.session_state.current_q_idx -= 1
+                    st.session_state.show_correct_answer = False
                     st.rerun()
+
             with col_nav2:
-                if st.button("Next Question ➡️", use_container_width=True) and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
-                    st.session_state.current_q_idx += 1
+                # Toggle button to display/hide correct option
+                btn_label = "🙈 Hide Correct Answer" if st.session_state.show_correct_answer else "👁️ Reveal Correct Answer"
+                if st.button(btn_label, use_container_width=True):
+                    st.session_state.show_correct_answer = not st.session_state.show_correct_answer
                     st.rerun()
+
             with col_nav3:
-                if st.button("🏆 End Quiz Session", use_container_width=True):
+                if st.button("Next ➡️", use_container_width=True) and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
+                    st.session_state.current_q_idx += 1
+                    st.session_state.show_correct_answer = False
+                    st.rerun()
+
+            with col_nav4:
+                if st.button("🏆 End Quiz", use_container_width=True):
                     st.session_state.quiz_ended = True
                     st.rerun()
 
