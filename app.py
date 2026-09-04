@@ -543,6 +543,7 @@ elif st.session_state.user_role == "teacher":
                         )
                         conn.commit()
                     st.success(f"Successfully saved {file_name} into Document Question Bank!")
+                    st.rerun()
                 else:
                     st.error("Please upload a valid file first.")
 
@@ -566,7 +567,7 @@ elif st.session_state.user_role == "teacher":
                     filtered_doc_df[["Select", "id", "topic", "title", "file_name"]],
                     column_config={
                         "Select": st.column_config.CheckboxColumn("Include in Quiz?", default=False),
-                        "id": "Doc ID",
+                        "id": "id",
                         "topic": "Topic",
                         "title": "Title",
                         "file_name": "File Name",
@@ -577,7 +578,7 @@ elif st.session_state.user_role == "teacher":
                     height=280
                 )
 
-                selected_doc_ids = edited_doc_df[edited_doc_df["Select"] == True]["Doc ID"].tolist()
+                selected_doc_ids = edited_doc_df[edited_doc_df["Select"] == True]["id"].tolist()
 
                 if st.button("Load Selected Questions to Live Projection 🚀", use_container_width=True):
                     if not selected_doc_ids:
