@@ -24,22 +24,22 @@ st.markdown(
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
     
-    /* Enlarged Student & Live Projection Question Box */
-    .question-box {
+    /* Enlarged Question Box for Live Projection */
+    .projection-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 3px solid #818CF8;
-        border-radius: 18px;
-        padding: 35px 40px;
-        margin-top: 10px;
-        margin-bottom: 25px;
-        box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4);
+        border-radius: 20px;
+        padding: 40px 50px;
+        margin-top: 15px;
+        margin-bottom: 30px;
+        box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.5);
     }
-    .question-box h2 {
-        font-size: 2.2rem !important;
-        font-weight: 700 !important;
-        line-height: 1.4 !important;
+    
+    /* Style KaTeX rendered math inside projection box */
+    .projection-box .katex {
+        font-size: 2.6rem !important;
+        line-height: 1.5 !important;
         color: #FFFFFF !important;
-        margin: 0 !important;
     }
 
     /* Option Card Containers */
@@ -47,12 +47,8 @@ st.markdown(
         background-color: #1E293B;
         border: 2px solid #475569;
         border-radius: 12px;
-        padding: 20px 25px;
-        margin-bottom: 15px;
-    }
-    .option-card-wrapper h4 {
-        font-size: 1.35rem !important;
-        margin: 0 !important;
+        padding: 22px 28px;
+        margin-bottom: 18px;
     }
 </style>
 """,
@@ -60,59 +56,19 @@ st.markdown(
 )
 
 # ==========================================
-# 2. MATH CONVERSION & DATABASE HELPER
+# 2. MATH FORMATTING & DATABASE HELPER
 # ==========================================
 DB_FILE = "quiz_system.db"
 
-def clean_math_text(text: str) -> str:
-    """Converts TeX/LaTeX formulas to clean standard human-readable math symbols."""
+def format_math_for_display(text: str) -> str:
+    """Ensures raw math inputs are wrapped in LaTeX inline delimiters ($...$) 
+    so Streamlit renders them as crisp, standard textbook mathematical expressions."""
     if not text:
         return ""
-    
-    # 1. Strip outer inline dollar signs ($...$ or $$...$$)
-    text = re.sub(r'\$\$?(.*?)\$\$?', r'\1', text)
-    
-    # 2. Replace common LaTeX fractions \frac{num}{den} -> (num / den)
-    text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', text)
-    
-    # 3. Replace square roots \sqrt{x} -> √(x)
-    text = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', text)
-    text = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', text)
-
-    # 4. Standard TeX Math Symbols
-    replacements = {
-        r'\times': '×',
-        r'\div': '÷',
-        r'\pm': '±',
-        r'\cdot': '·',
-        r'\leq': '≤',
-        r'\geq': '≥',
-        r'\neq': '≠',
-        r'\approx': '≈',
-        r'\infty': '∞',
-        r'\pi': 'π',
-        r'\theta': 'θ',
-        r'\alpha': 'α',
-        r'\beta': 'β',
-        r'\gamma': 'γ',
-        r'\delta': 'δ',
-        r'\int': '∫',
-        r'\sum': '∑',
-        r'\lim': 'lim',
-        r'\rightarrow': '→',
-        r'\to': '→',
-        r'\partial': '∂',
-        r'\Delta': 'Δ',
-    }
-    for tex, symbol in replacements.items():
-        text = text.replace(tex, symbol)
-
-    # 5. Clean up curly braces around exponents/subscripts like e^{3t} -> e^(3t)
-    text = re.sub(r'\^\{([^}]+)\}', r'^(\1)', text)
-    text = re.sub(r'_\{([^}]+)\}', r'_(\1)', text)
-
-    # Clean stray LaTeX backslashes or extra spaces
-    text = text.replace('\\', '').strip()
+    text = text.strip()
+    # If text contains math commands (\frac, \sqrt, etc.) but isn't wrapped in $, wrap it automatically
+    if any(cmd in text for cmd in ["\\frac", "\\sqrt", "^", "_", "\\int", "\\sum", "\\lim", "\\times", "\\pm"]) and not text.startswith("$"):
+        return f"${text}$"
     return text
 
 def get_db_connection():
@@ -304,12 +260,15 @@ elif st.session_state.user_role == "student":
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
-        clean_q_text = clean_math_text(curr_q['question'])
         st.markdown(f"#### Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}")
-        st.markdown(f"<div class='question-box'><h2>{clean_q_text}</h2></div>", unsafe_allow_html=True)
+        
+        # Display math expression cleanly using KaTeX
+        st.markdown(f"<div class='projection-box'>", unsafe_allow_html=True)
+        st.write(format_math_for_display(curr_q['question']))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         choices = [
-            f"{curr_q['option_labels'][i]}: {clean_math_text(curr_q['options'][i])}"
+            f"{curr_q['option_labels'][i]}: {curr_q['options'][i]}"
             for i in range(len(curr_q["options"]))
         ]
 
@@ -576,7 +535,7 @@ elif st.session_state.user_role == "teacher":
             with col_q1:
                 st.subheader("1. Add Question to Database")
                 q_topic = st.text_input("Topic Name:", value="Differential Equations")
-                q_text = st.text_area("Question Text:", value=r"Laplace Transform of e^{3t} is:")
+                q_text = st.text_area("Question Text (Use standard math or TeX):", value=r"Find the Laplace Transform of $e^{3t}$:")
 
                 fmt_choice = st.selectbox(
                     "Select Option Labeling Style:",
@@ -775,24 +734,20 @@ elif st.session_state.user_role == "teacher":
             st.warning("No active quiz questions loaded. Import from Question Bank first.")
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
-            clean_q_text = clean_math_text(curr_q['question'])
 
             st.markdown(f"### Question {st.session_state.current_q_idx + 1} / {len(st.session_state.quiz_questions)}")
-            st.markdown(f"<div class='question-box'><h2>{clean_q_text}</h2></div>", unsafe_allow_html=True)
+            
+            # Enlarged Projection Container using Standard Math Typesetting
+            st.markdown("<div class='projection-box'>", unsafe_allow_html=True)
+            st.write(format_math_for_display(curr_q['question']))
+            st.markdown("</div>", unsafe_allow_html=True)
 
             cols = st.columns(2)
             for idx, opt in enumerate(curr_q["options"]):
                 lbl = curr_q["option_labels"][idx]
-                clean_opt_text = clean_math_text(opt)
                 with cols[idx % 2]:
-                    st.markdown(
-                        f"""
-                        <div class='option-card-wrapper'>
-                            <h4><b>{lbl}:</b> {clean_opt_text}</h4>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown(f"<div class='option-card-wrapper'><h4><b>{lbl}:</b></h4></div>", unsafe_allow_html=True)
+                    st.latex(format_math_for_display(opt).replace("$", ""))
 
             col_p1, col_p2, col_p3 = st.columns(3)
             with col_p1:
@@ -811,8 +766,8 @@ elif st.session_state.user_role == "teacher":
 
             if st.session_state.show_correct_answer:
                 c_idx = curr_q["correct_idx"]
-                correct_opt_clean = clean_math_text(curr_q['options'][c_idx])
-                st.success(f"Correct Answer: **{curr_q['option_labels'][c_idx]} - {correct_opt_clean}**")
+                st.success(f"Correct Answer: **{curr_q['option_labels'][c_idx]}**")
+                st.latex(format_math_for_display(curr_q['options'][c_idx]).replace("$", ""))
 
     # --- TAB 5: DOCUMENT PROJECTION ---
     with tab_doc_portal:
