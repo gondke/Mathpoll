@@ -567,7 +567,7 @@ elif st.session_state.user_role == "teacher":
                         filtered_qs[["Select", "id", "topic", "question"]],
                         column_config={
                             "Select": st.column_config.CheckboxColumn(
-                                "Include in Quiz?",
+                                "Select Question",
                                 default=False,
                             ),
                             "id": "Q_ID",
@@ -582,7 +582,8 @@ elif st.session_state.user_role == "teacher":
 
                     selected_ids = edited_df[edited_df["Select"] == True]["id"].tolist()
 
-                    col_btn1, col_btn2 = st.columns(2)
+                    col_btn1, col_btn2, col_btn3 = st.columns(3)
+                    
                     with col_btn1:
                         if st.button("Import Selected Questions 🚀", use_container_width=True):
                             if not selected_ids:
@@ -618,6 +619,23 @@ elif st.session_state.user_role == "teacher":
                             st.session_state.responses = []
                             st.session_state.show_correct_answer = False
                             st.success(f"Imported all {len(filtered_qs)} filtered questions!")
+
+                    with col_btn3:
+                        if st.button("🗑️ Delete Selected Questions", type="primary", use_container_width=True):
+                            if not selected_ids:
+                                st.warning("Please check at least one question checkbox to delete!")
+                            else:
+                                placeholders = ",".join(["?"] * len(selected_ids))
+                                conn.execute(
+                                    f"DELETE FROM question_bank WHERE id IN ({placeholders})",
+                                    selected_ids,
+                                )
+                                conn.commit()
+                                st.session_state.quiz_questions = []
+                                st.session_state.current_q_idx = 0
+                                st.session_state.responses = []
+                                st.success(f"Successfully deleted {len(selected_ids)} question(s) from database!")
+                                st.rerun()
 
                 else:
                     st.info("No questions stored in database yet.")
