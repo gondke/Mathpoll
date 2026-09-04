@@ -1,6 +1,7 @@
 import base64
 import json
 import random
+import re
 import sqlite3
 import string
 import pandas as pd
@@ -23,13 +24,22 @@ st.markdown(
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
     
-    /* Student View Question Box */
+    /* Enlarged Student & Live Projection Question Box */
     .question-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
-        border: 2px solid #818CF8;
-        border-radius: 15px;
-        padding: 25px;
-        margin-bottom: 20px;
+        border: 3px solid #818CF8;
+        border-radius: 18px;
+        padding: 35px 40px;
+        margin-top: 10px;
+        margin-bottom: 25px;
+        box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    .question-box h2 {
+        font-size: 2.2rem !important;
+        font-weight: 700 !important;
+        line-height: 1.4 !important;
+        color: #FFFFFF !important;
+        margin: 0 !important;
     }
 
     /* Option Card Containers */
@@ -37,8 +47,12 @@ st.markdown(
         background-color: #1E293B;
         border: 2px solid #475569;
         border-radius: 12px;
-        padding: 15px 20px;
+        padding: 20px 25px;
         margin-bottom: 15px;
+    }
+    .option-card-wrapper h4 {
+        font-size: 1.35rem !important;
+        margin: 0 !important;
     }
 </style>
 """,
@@ -46,9 +60,60 @@ st.markdown(
 )
 
 # ==========================================
-# 2. SQLITE DATABASE ENGINE & HELPER FUNCTIONS
+# 2. MATH CONVERSION & DATABASE HELPER
 # ==========================================
 DB_FILE = "quiz_system.db"
+
+def clean_math_text(text: str) -> str:
+    """Converts TeX/LaTeX formulas to clean standard human-readable math symbols."""
+    if not text:
+        return ""
+    
+    # 1. Strip outer inline dollar signs ($...$ or $$...$$)
+    text = re.sub(r'\$\$?(.*?)\$\$?', r'\1', text)
+    
+    # 2. Replace common LaTeX fractions \frac{num}{den} -> (num / den)
+    text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', text)
+    
+    # 3. Replace square roots \sqrt{x} -> √(x)
+    text = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', text)
+    text = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', text)
+
+    # 4. Standard TeX Math Symbols
+    replacements = {
+        r'\times': '×',
+        r'\div': '÷',
+        r'\pm': '±',
+        r'\cdot': '·',
+        r'\leq': '≤',
+        r'\geq': '≥',
+        r'\neq': '≠',
+        r'\approx': '≈',
+        r'\infty': '∞',
+        r'\pi': 'π',
+        r'\theta': 'θ',
+        r'\alpha': 'α',
+        r'\beta': 'β',
+        r'\gamma': 'γ',
+        r'\delta': 'δ',
+        r'\int': '∫',
+        r'\sum': '∑',
+        r'\lim': 'lim',
+        r'\rightarrow': '→',
+        r'\to': '→',
+        r'\partial': '∂',
+        r'\Delta': 'Δ',
+    }
+    for tex, symbol in replacements.items():
+        text = text.replace(tex, symbol)
+
+    # 5. Clean up curly braces around exponents/subscripts like e^{3t} -> e^(3t)
+    text = re.sub(r'\^\{([^}]+)\}', r'^(\1)', text)
+    text = re.sub(r'_\{([^}]+)\}', r'_(\1)', text)
+
+    # Clean stray LaTeX backslashes or extra spaces
+    text = text.replace('\\', '').strip()
+    return text
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -239,11 +304,12 @@ elif st.session_state.user_role == "student":
     else:
         curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
 
+        clean_q_text = clean_math_text(curr_q['question'])
         st.markdown(f"#### Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}")
-        st.write(f"### {curr_q['question']}")
+        st.markdown(f"<div class='question-box'><h2>{clean_q_text}</h2></div>", unsafe_allow_html=True)
 
         choices = [
-            f"{curr_q['option_labels'][i]}: {curr_q['options'][i]}"
+            f"{curr_q['option_labels'][i]}: {clean_math_text(curr_q['options'][i])}"
             for i in range(len(curr_q["options"]))
         ]
 
@@ -510,7 +576,7 @@ elif st.session_state.user_role == "teacher":
             with col_q1:
                 st.subheader("1. Add Question to Database")
                 q_topic = st.text_input("Topic Name:", value="Differential Equations")
-                q_text = st.text_area("Question Text:", value=r"Laplace Transform of $e^{3t}$ is:")
+                q_text = st.text_area("Question Text:", value=r"Laplace Transform of e^{3t} is:")
 
                 fmt_choice = st.selectbox(
                     "Select Option Labeling Style:",
@@ -520,11 +586,11 @@ elif st.session_state.user_role == "teacher":
 
                 col_op1, col_op2 = st.columns(2)
                 with col_op1:
-                    op_a = st.text_input(f"{selected_labels[0]}:", value=r"$\frac{1}{s+3}$")
-                    op_b = st.text_input(f"{selected_labels[1]}:", value=r"$\frac{1}{s-3}$")
+                    op_a = st.text_input(f"{selected_labels[0]}:", value=r"\frac{1}{s+3}")
+                    op_b = st.text_input(f"{selected_labels[1]}:", value=r"\frac{1}{s-3}")
                 with col_op2:
-                    op_c = st.text_input(f"{selected_labels[2]}:", value=r"$\frac{s}{s-3}$")
-                    op_d = st.text_input(f"{selected_labels[3]}:", value=r"$\frac{s}{s+3}$")
+                    op_c = st.text_input(f"{selected_labels[2]}:", value=r"\frac{s}{s-3}")
+                    op_d = st.text_input(f"{selected_labels[3]}:", value=r"\frac{s}{s+3}")
 
                 correct_op = st.selectbox(
                     "Correct Option:",
@@ -709,18 +775,20 @@ elif st.session_state.user_role == "teacher":
             st.warning("No active quiz questions loaded. Import from Question Bank first.")
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
-            
+            clean_q_text = clean_math_text(curr_q['question'])
+
             st.markdown(f"### Question {st.session_state.current_q_idx + 1} / {len(st.session_state.quiz_questions)}")
-            st.markdown(f"<div class='question-box'><h2>{curr_q['question']}</h2></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='question-box'><h2>{clean_q_text}</h2></div>", unsafe_allow_html=True)
 
             cols = st.columns(2)
             for idx, opt in enumerate(curr_q["options"]):
                 lbl = curr_q["option_labels"][idx]
+                clean_opt_text = clean_math_text(opt)
                 with cols[idx % 2]:
                     st.markdown(
                         f"""
                         <div class='option-card-wrapper'>
-                            <h4><b>{lbl}:</b> {opt}</h4>
+                            <h4><b>{lbl}:</b> {clean_opt_text}</h4>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -743,7 +811,8 @@ elif st.session_state.user_role == "teacher":
 
             if st.session_state.show_correct_answer:
                 c_idx = curr_q["correct_idx"]
-                st.success(f"Correct Answer: **{curr_q['option_labels'][c_idx]} - {curr_q['options'][c_idx]}**")
+                correct_opt_clean = clean_math_text(curr_q['options'][c_idx])
+                st.success(f"Correct Answer: **{curr_q['option_labels'][c_idx]} - {correct_opt_clean}**")
 
     # --- TAB 5: DOCUMENT PROJECTION ---
     with tab_doc_portal:
