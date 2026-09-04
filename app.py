@@ -1,3 +1,4 @@
+import base64
 import json
 import random
 import sqlite3
@@ -5,7 +6,6 @@ import string
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 
 # ==========================================
@@ -87,6 +87,15 @@ def init_db():
                         options TEXT NOT NULL,
                         correct_idx INTEGER NOT NULL
                     )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS pdf_jpg_questions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        topic TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        file_type TEXT NOT NULL,
+                        file_bytes BLOB NOT NULL,
+                        answer_key TEXT NOT NULL
+                    )""")
         conn.commit()
 
 init_db()
@@ -126,6 +135,14 @@ if "quiz_ended" not in st.session_state:
     st.session_state.quiz_ended = False
 if "show_correct_answer" not in st.session_state:
     st.session_state.show_correct_answer = False
+
+# Document / Image Quiz Session States
+if "doc_questions" not in st.session_state:
+    st.session_state.doc_questions = []
+if "doc_current_idx" not in st.session_state:
+    st.session_state.doc_current_idx = 0
+if "doc_show_answer" not in st.session_state:
+    st.session_state.doc_show_answer = False
 
 def validate_session_code(code):
     clean_code = code.strip().upper()
@@ -288,10 +305,12 @@ elif st.session_state.user_role == "teacher":
 
     st.title("🧪 STEM Live Quiz & Classroom Manager")
 
-    tab_class_db, tab_q_db, tab_portal, tab_analytics = st.tabs([
+    tab_class_db, tab_q_db, tab_upload_db, tab_portal, tab_doc_portal, tab_analytics = st.tabs([
         "🏫 Classroom & Group DB Manager",
         "📚 Topic-Wise Question Bank DB",
+        "📄 Upload & Manage Doc/Image Questions",
         "📺 Live Classroom Projection Display",
+        "🖼️ Live Document/Image Quiz Projection",
         "📊 Live Analytics & Leaderboard",
     ])
 
@@ -498,7 +517,84 @@ elif st.session_state.user_role == "teacher":
                 else:
                     st.info("No questions stored in database yet.")
 
-    # --- TAB 3: LIVE CLASSROOM PROJECTION DISPLAY ---
+    # --- TAB 3: UPLOAD & MANAGE DOC/IMAGE QUESTIONS ---
+    with tab_upload_db:
+        st.header("📄 Upload & Manage Document/Image Question Bank")
+        
+        col_up1, col_up2 = st.columns([1, 1.2])
+
+        with col_up1:
+            st.subheader("1. Upload Question File (PDF/JPG/PNG)")
+            doc_topic = st.text_input("Question Topic:", value="Physics Mechanics", key="doc_topic_in")
+            doc_title = st.text_input("Question Title/Identifier:", value="Q1 - Vector Diagram", key="doc_title_in")
+            uploaded_file = st.file_uploader("Choose File", type=["jpg", "jpeg", "png", "pdf"])
+            doc_answer_key = st.text_input("Answer Key / Solution Note:", value="Option B (9.8 m/s²)")
+
+            if st.button("Save Uploaded Question 💾", use_container_width=True):
+                if uploaded_file is not None:
+                    file_bytes = uploaded_file.read()
+                    file_type = uploaded_file.type
+                    file_name = uploaded_file.name
+
+                    with get_db_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO pdf_jpg_questions (topic, title, file_name, file_type, file_bytes, answer_key) VALUES (?, ?, ?, ?, ?, ?)",
+                            (doc_topic, doc_title, file_name, file_type, file_bytes, doc_answer_key),
+                        )
+                        conn.commit()
+                    st.success(f"Successfully saved {file_name} into Document Question Bank!")
+                else:
+                    st.error("Please upload a valid file first.")
+
+        with col_up2:
+            st.subheader("2. Filter & Select Document Questions for Live Session")
+            with get_db_connection() as conn:
+                doc_bank_df = pd.read_sql("SELECT id, topic, title, file_name, file_type, answer_key FROM pdf_jpg_questions", conn)
+
+            if not doc_bank_df.empty:
+                doc_topics = ["All Topics"] + doc_bank_df["topic"].unique().tolist()
+                sel_doc_topic = st.selectbox("Filter Document Bank by Topic:", doc_topics)
+
+                if sel_doc_topic != "All Topics":
+                    filtered_doc_df = doc_bank_df[doc_bank_df["topic"] == sel_doc_topic].copy()
+                else:
+                    filtered_doc_df = doc_bank_df.copy()
+
+                filtered_doc_df.insert(0, "Select", False)
+
+                edited_doc_df = st.data_editor(
+                    filtered_doc_df[["Select", "id", "topic", "title", "file_name"]],
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn("Include in Quiz?", default=False),
+                        "id": "Doc ID",
+                        "topic": "Topic",
+                        "title": "Title",
+                        "file_name": "File Name",
+                    },
+                    disabled=["id", "topic", "title", "file_name"],
+                    hide_index=True,
+                    use_container_width=True,
+                    height=280
+                )
+
+                selected_doc_ids = edited_doc_df[edited_doc_df["Select"] == True]["Doc ID"].tolist()
+
+                if st.button("Load Selected Questions to Live Projection 🚀", use_container_width=True):
+                    if not selected_doc_ids:
+                        st.warning("Please select at least one document question checkbox.")
+                    else:
+                        with get_db_connection() as conn:
+                            query = f"SELECT * FROM pdf_jpg_questions WHERE id IN ({','.join(map(str, selected_doc_ids))})"
+                            loaded_docs = pd.read_sql(query, conn)
+                        
+                        st.session_state.doc_questions = loaded_docs.to_dict(orient="records")
+                        st.session_state.doc_current_idx = 0
+                        st.session_state.doc_show_answer = False
+                        st.success(f"Loaded {len(loaded_docs)} document/image questions for Live Quiz Projection!")
+            else:
+                st.info("No uploaded questions found in the document bank.")
+
+    # --- TAB 4: LIVE CLASSROOM PROJECTION DISPLAY ---
     with tab_portal:
         st.header("📺 Live Classroom Projection Display")
         
@@ -586,7 +682,84 @@ elif st.session_state.user_role == "teacher":
                     st.session_state.quiz_ended = True
                     st.rerun()
 
-    # --- TAB 4: ANALYTICS ---
+    # --- TAB 5: LIVE DOCUMENT / IMAGE QUIZ PROJECTION ---
+    with tab_doc_portal:
+        st.header("🖼️ Live Document / Image Quiz Projection Display")
+
+        if not st.session_state.doc_questions:
+            st.warning("No Document/Image questions loaded. Please select and load them from '📄 Upload & Manage Doc/Image Questions' tab.")
+        else:
+            curr_doc = st.session_state.doc_questions[st.session_state.doc_current_idx]
+            
+            with st.container(border=True):
+                col_d_badge, col_d_count = st.columns([1, 1])
+                with col_d_badge:
+                    st.markdown(f"#### 📌 `{curr_doc['topic'].upper()}` - {curr_doc['title']}")
+                with col_d_count:
+                    st.markdown(
+                        f"<div style='text-align: right; color: #94A3B8; font-weight: bold; font-size: 1.2rem;'>"
+                        f"Question {st.session_state.doc_current_idx + 1} of {len(st.session_state.doc_questions)}</div>",
+                        unsafe_allow_html=True
+                    )
+
+                st.markdown("---")
+
+                # Document / Image Renderer Box
+                file_bytes = curr_doc["file_bytes"]
+                file_type = curr_doc["file_type"]
+
+                if "pdf" in file_type.lower():
+                    base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
+                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+                    st.markdown(pdf_display, unsafe_allow_html=True)
+                else:
+                    st.image(file_bytes, use_column_width=True)
+
+                st.markdown("---")
+
+                # Correct Answer Reveal Box
+                if st.session_state.doc_show_answer:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background-color: #064E3B;
+                            border: 3px solid #059669;
+                            border-radius: 12px;
+                            padding: 20px;
+                            margin-top: 10px;
+                            box-shadow: 0 0 15px rgba(5, 150, 105, 0.4);
+                        ">
+                            <h3 style="margin: 0; color: #34D399;">✅ Correct Solution / Answer Key:</h3>
+                            <h2 style="margin-top: 5px; color: #FFFFFF;">{curr_doc['answer_key']}</h2>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Controller Toolbar for Document Quiz
+            col_d_nav1, col_d_nav2, col_d_nav3 = st.columns([1, 1.2, 1])
+
+            with col_d_nav1:
+                if st.button("⬅️ Previous Doc Question", use_container_width=True) and st.session_state.doc_current_idx > 0:
+                    st.session_state.doc_current_idx -= 1
+                    st.session_state.doc_show_answer = False
+                    st.rerun()
+
+            with col_d_nav2:
+                doc_btn_label = "🙈 Hide Answer Key" if st.session_state.doc_show_answer else "👁️ Reveal Answer Key"
+                if st.button(doc_btn_label, use_container_width=True):
+                    st.session_state.doc_show_answer = not st.session_state.doc_show_answer
+                    st.rerun()
+
+            with col_d_nav3:
+                if st.button("Next Doc Question ➡️", use_container_width=True) and st.session_state.doc_current_idx < len(st.session_state.doc_questions) - 1:
+                    st.session_state.doc_current_idx += 1
+                    st.session_state.doc_show_answer = False
+                    st.rerun()
+
+    # --- TAB 6: ANALYTICS ---
     with tab_analytics:
         st.header("📊 Live Poll Analytics")
         df_resp = pd.DataFrame(st.session_state.responses)
