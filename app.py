@@ -51,7 +51,9 @@ st.markdown(
 DB_FILE = "quiz_system.db"
 
 def get_db_connection():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON;")
+    return conn
 
 def init_db():
     with get_db_connection() as conn:
@@ -65,19 +67,19 @@ def init_db():
                         class_id INTEGER,
                         roll_no TEXT NOT NULL,
                         name TEXT NOT NULL,
-                        FOREIGN KEY(class_id) REFERENCES classrooms(id)
+                        FOREIGN KEY(class_id) REFERENCES classrooms(id) ON DELETE CASCADE
                     )""")
         c.execute("""CREATE TABLE IF NOT EXISTS active_sessions (
                         session_code TEXT PRIMARY KEY,
                         class_id INTEGER,
-                        FOREIGN KEY(class_id) REFERENCES classrooms(id)
+                        FOREIGN KEY(class_id) REFERENCES classrooms(id) ON DELETE CASCADE
                     )""")
         c.execute("""CREATE TABLE IF NOT EXISTS student_groups (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         class_id INTEGER,
                         group_name TEXT NOT NULL,
                         roll_no TEXT NOT NULL,
-                        FOREIGN KEY(class_id) REFERENCES classrooms(id)
+                        FOREIGN KEY(class_id) REFERENCES classrooms(id) ON DELETE CASCADE
                     )""")
         c.execute("""CREATE TABLE IF NOT EXISTS question_bank (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +138,6 @@ if "quiz_ended" not in st.session_state:
 if "show_correct_answer" not in st.session_state:
     st.session_state.show_correct_answer = False
 
-# Document / Image Quiz Session States
 if "doc_questions" not in st.session_state:
     st.session_state.doc_questions = []
 if "doc_current_idx" not in st.session_state:
@@ -317,7 +318,7 @@ elif st.session_state.user_role == "teacher":
     # --- TAB 1: CLASSROOM DB ---
     with tab_class_db:
         st.header("🗄️ Classroom & Group Roster Database")
-        col_c1, col_c2 = st.columns([1, 1])
+        col_c1, col_c2 = st.columns([1, 1.2])
 
         with get_db_connection() as conn:
             with col_c1:
@@ -325,11 +326,10 @@ elif st.session_state.user_role == "teacher":
                 new_class = st.text_input("New Classroom Name:")
                 if st.button("Create Classroom ➕") and new_class:
                     try:
-                        conn.execute(
-                            "INSERT INTO classrooms (class_name) VALUES (?)", (new_class,)
-                        )
+                        conn.execute("INSERT INTO classrooms (class_name) VALUES (?)", (new_class,))
                         conn.commit()
                         st.success(f"Classroom '{new_class}' created!")
+                        st.rerun()
                     except sqlite3.IntegrityError:
                         st.error("Classroom name already exists!")
 
@@ -338,9 +338,7 @@ elif st.session_state.user_role == "teacher":
                     selected_class_name = st.selectbox(
                         "Select Active Classroom:", classes_df["class_name"].tolist()
                     )
-                    selected_class_row = classes_df[
-                        classes_df["class_name"] == selected_class_name
-                    ].iloc[0]
+                    selected_class_row = classes_df[classes_df["class_name"] == selected_class_name].iloc[0]
                     st.session_state.active_class_id = int(selected_class_row["id"])
 
                     conn.execute(
@@ -349,52 +347,140 @@ elif st.session_state.user_role == "teacher":
                     )
                     conn.commit()
 
-                    st.markdown("---")
-                    st.subheader("2. Add Students")
-                    s_roll = st.text_input("Roll Number:")
-                    s_name = st.text_input("Student Name:")
-                    if st.button("Add Student"):
-                        conn.execute(
-                            "INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)",
-                            (st.session_state.active_class_id, s_roll, s_name),
-                        )
+                    if st.button("🗑️ Delete Current Classroom", type="primary"):
+                        conn.execute("DELETE FROM classrooms WHERE id = ?", (st.session_state.active_class_id,))
                         conn.commit()
-                        st.success(f"Added {s_name}!")
+                        st.session_state.active_class_id = None
+                        st.success(f"Classroom '{selected_class_name}' and all associated student data were deleted.")
+                        st.rerun()
+
+                    st.markdown("---")
+                    st.subheader("2. Add Students to Selected Class")
+                    
+                    add_mode = st.radio("Student Registration Method:", ["Manual Single Entry", "CSV Upload"], horizontal=True)
+                    
+                    if add_mode == "Manual Single Entry":
+                        s_roll = st.text_input("Roll Number:")
+                        s_name = st.text_input("Student Name:")
+                        if st.button("Add Student"):
+                            if s_roll and s_name:
+                                conn.execute(
+                                    "INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)",
+                                    (st.session_state.active_class_id, s_roll, s_name),
+                                )
+                                conn.commit()
+                                st.success(f"Added {s_name} ({s_roll})!")
+                                st.rerun()
+                            else:
+                                st.warning("Provide both roll number and name.")
+                    else:
+                        st.markdown("**Upload CSV file** with columns: `roll_no`, `name`")
+                        csv_file = st.file_uploader("Upload Student Roster CSV", type=["csv"])
+                        if csv_file is not None:
+                            try:
+                                df_upload = pd.read_csv(csv_file)
+                                df_upload.columns = df_upload.columns.str.strip().str.lower()
+                                if "roll_no" in df_upload.columns and "name" in df_upload.columns:
+                                    added_count = 0
+                                    for _, r in df_upload.iterrows():
+                                        r_no = str(r["roll_no"]).strip()
+                                        n_me = str(r["name"]).strip()
+                                        if r_no and n_me:
+                                            conn.execute(
+                                                "INSERT INTO students (class_id, roll_no, name) VALUES (?, ?, ?)",
+                                                (st.session_state.active_class_id, r_no, n_me),
+                                            )
+                                            added_count += 1
+                                    conn.commit()
+                                    st.success(f"Successfully imported {added_count} students from CSV!")
+                                    st.rerun()
+                                else:
+                                    st.error("CSV must contain `roll_no` and `name` headers.")
+                            except Exception as ex:
+                                st.error(f"Error parsing CSV: {ex}")
 
             with col_c2:
-                st.subheader("3. Classroom Roster & Groups")
+                st.subheader("3. Classroom Roster & Group Formation")
                 if st.session_state.active_class_id:
                     students_in_class = pd.read_sql(
                         "SELECT roll_no, name FROM students WHERE class_id = ?",
                         conn,
                         params=(st.session_state.active_class_id,),
                     )
+                    
+                    st.markdown("**Enrolled Students:**")
                     st.dataframe(students_in_class, height=180, use_container_width=True)
 
-                    num_g = st.number_input(
-                        "Number of Groups", min_value=2, max_value=10, value=4
-                    )
-                    if st.button("Auto-Form Groups 🎲") and not students_in_class.empty:
-                        conn.execute(
-                            "DELETE FROM student_groups WHERE class_id = ?",
-                            (st.session_state.active_class_id,),
+                    if not students_in_class.empty:
+                        all_student_rolls = (students_in_class["roll_no"] + " (" + students_in_class["name"] + ")").tolist()
+                        roll_map = dict(zip(all_student_rolls, students_in_class["roll_no"]))
+
+                        existing_groups_df = pd.read_sql(
+                            "SELECT group_name, roll_no FROM student_groups WHERE class_id = ?",
+                            conn,
+                            params=(st.session_state.active_class_id,),
                         )
-                        shuffled_rolls = (
-                            students_in_class["roll_no"].sample(frac=1).tolist()
-                        )
-                        st.session_state.groups = {}
-                        for i in range(num_g):
-                            grp_name = f"Group {chr(65 + i)}"
-                            members = shuffled_rolls[i::num_g]
-                            st.session_state.groups[grp_name] = members
-                            for r_no in members:
-                                conn.execute(
-                                    "INSERT INTO student_groups (class_id, group_name, roll_no)"
-                                    " VALUES (?, ?, ?)",
-                                    (st.session_state.active_class_id, grp_name, r_no),
-                                )
-                        conn.commit()
-                        st.success(f"Formed {num_g} groups!")
+                        if not existing_groups_df.empty:
+                            st.markdown("**Current Group Assignments:**")
+                            st.dataframe(
+                                existing_groups_df.groupby("group_name")["roll_no"].apply(list).reset_index(),
+                                use_container_width=True
+                            )
+
+                        group_method = st.radio("Group Formation Mode:", ["Auto-Form Groups", "Manual Group Assignment"], horizontal=True)
+
+                        if group_method == "Auto-Form Groups":
+                            num_g = st.number_input("Number of Groups", min_value=2, max_value=10, value=4)
+                            if st.button("Auto-Form Groups 🎲"):
+                                conn.execute("DELETE FROM student_groups WHERE class_id = ?", (st.session_state.active_class_id,))
+                                shuffled_rolls = students_in_class["roll_no"].sample(frac=1).tolist()
+                                st.session_state.groups = {}
+                                for i in range(num_g):
+                                    grp_name = f"Group {chr(65 + i)}"
+                                    members = shuffled_rolls[i::num_g]
+                                    st.session_state.groups[grp_name] = members
+                                    for r_no in members:
+                                        conn.execute(
+                                            "INSERT INTO student_groups (class_id, group_name, roll_no) VALUES (?, ?, ?)",
+                                            (st.session_state.active_class_id, grp_name, r_no),
+                                        )
+                                conn.commit()
+                                st.success(f"Auto-formed {num_g} groups!")
+                                st.rerun()
+
+                        else:
+                            st.markdown("#### Manual Group Creation")
+                            manual_grp_name = st.text_input("Group Name:", value="Group A")
+                            selected_students_labels = st.multiselect("Select Students for this Group:", options=all_student_rolls)
+                            selected_rolls = [roll_map[lbl] for lbl in selected_students_labels]
+
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                if st.button("Save Manual Group 💾"):
+                                    if manual_grp_name and selected_rolls:
+                                        conn.execute(
+                                            "DELETE FROM student_groups WHERE class_id = ? AND (group_name = ? OR roll_no IN ({}))".format(
+                                                ",".join(["?"] * len(selected_rolls))
+                                            ),
+                                            [st.session_state.active_class_id, manual_grp_name] + selected_rolls,
+                                        )
+                                        for r_no in selected_rolls:
+                                            conn.execute(
+                                                "INSERT INTO student_groups (class_id, group_name, roll_no) VALUES (?, ?, ?)",
+                                                (st.session_state.active_class_id, manual_grp_name, r_no),
+                                            )
+                                        conn.commit()
+                                        st.success(f"Saved '{manual_grp_name}' with {len(selected_rolls)} members!")
+                                        st.rerun()
+                                    else:
+                                        st.warning("Provide group name and select at least one student.")
+                            
+                            with col_m2:
+                                if st.button("Reset All Groups 🧹"):
+                                    conn.execute("DELETE FROM student_groups WHERE class_id = ?", (st.session_state.active_class_id,))
+                                    conn.commit()
+                                    st.success("Cleared group configurations.")
+                                    st.rerun()
 
     # --- TAB 2: TOPIC-WISE QUESTION BANK DB ---
     with tab_q_db:
@@ -606,9 +692,7 @@ elif st.session_state.user_role == "teacher":
             q_topic = curr_q.get("topic", "General")
             correct_idx = curr_q.get("correct_idx", 0)
             
-            # Classroom Big Single Container Box
             with st.container(border=True):
-                # Header Badge & Question counter
                 col_badge, col_count = st.columns([1, 1])
                 with col_badge:
                     st.markdown(f"#### 📌 `{q_topic.upper()}`")
@@ -616,22 +700,16 @@ elif st.session_state.user_role == "teacher":
                     st.markdown(f"<div style='text-align: right; color: #94A3B8; font-weight: bold; font-size: 1.2rem;'>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</div>", unsafe_allow_html=True)
 
                 st.markdown("---")
-
-                # Big Native Math/LaTeX Question Display
                 st.write(f"# {curr_q['question']}")
-
                 st.markdown("---")
 
-                # Options rendered in 2x2 Big Grid using Native LaTeX processing
                 col1, col2 = st.columns(2)
-                
                 for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
                     target_col = col1 if idx % 2 == 0 else col2
                     is_correct = (idx == correct_idx) and st.session_state.show_correct_answer
                     
                     with target_col:
                         if is_correct:
-                            # Highlighted Correct Answer styling
                             st.markdown(
                                 f"""
                                 <div style="
@@ -649,14 +727,12 @@ elif st.session_state.user_role == "teacher":
                             )
                             st.write(f"## {opt_text}")
                         else:
-                            # Standard Card Container
                             with st.container(border=True):
                                 st.write(f"### **{label}**")
                                 st.write(f"## {opt_text}")
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # Controller Toolbar
             col_nav1, col_nav2, col_nav3, col_nav4 = st.columns([1, 1.2, 1, 1])
             
             with col_nav1:
@@ -666,7 +742,6 @@ elif st.session_state.user_role == "teacher":
                     st.rerun()
 
             with col_nav2:
-                # Toggle button to display/hide correct option
                 btn_label = "🙈 Hide Correct Answer" if st.session_state.show_correct_answer else "👁️ Reveal Correct Answer"
                 if st.button(btn_label, use_container_width=True):
                     st.session_state.show_correct_answer = not st.session_state.show_correct_answer
@@ -705,7 +780,6 @@ elif st.session_state.user_role == "teacher":
 
                 st.markdown("---")
 
-                # Document / Image Renderer Box
                 file_bytes = curr_doc["file_bytes"]
                 file_type = curr_doc["file_type"]
 
@@ -718,7 +792,6 @@ elif st.session_state.user_role == "teacher":
 
                 st.markdown("---")
 
-                # Correct Answer Reveal Box
                 if st.session_state.doc_show_answer:
                     st.markdown(
                         f"""
@@ -739,7 +812,6 @@ elif st.session_state.user_role == "teacher":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # Controller Toolbar for Document Quiz
             col_d_nav1, col_d_nav2, col_d_nav3 = st.columns([1, 1.2, 1])
 
             with col_d_nav1:
