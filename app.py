@@ -22,12 +22,89 @@ st.markdown(
     """
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
+    
+    /* Student View Question Box */
     .question-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 2px solid #818CF8;
         border-radius: 15px;
         padding: 25px;
         margin-bottom: 20px;
+    }
+
+    /* Live Classroom Projection Box */
+    .classroom-projection-box {
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        border: 3px solid #38BDF8;
+        border-radius: 20px;
+        padding: 35px;
+        margin-top: 10px;
+        margin-bottom: 25px;
+        box-shadow: 0px 10px 30px rgba(56, 189, 248, 0.2);
+    }
+    
+    .projection-topic-badge {
+        background-color: #0284C7;
+        color: #FFFFFF;
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        display: inline-block;
+        margin-bottom: 15px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .projection-question-title {
+        color: #F8FAFC;
+        font-size: 2.2rem;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-bottom: 30px;
+        border-bottom: 2px solid #334155;
+        padding-bottom: 20px;
+    }
+
+    .projection-options-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    .projection-option-card {
+        background-color: #1E293B;
+        border: 2px solid #475569;
+        border-radius: 12px;
+        padding: 18px 24px;
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #E2E8F0;
+        display: flex;
+        align-items: center;
+        transition: all 0.3s ease;
+    }
+
+    .projection-option-label {
+        background-color: #3B82F6;
+        color: #FFFFFF;
+        border-radius: 8px;
+        padding: 4px 14px;
+        margin-right: 16px;
+        font-size: 1.4rem;
+        font-weight: 800;
+    }
+
+    @media (max-width: 900px) {
+        .projection-options-grid {
+            grid-template-columns: 1fr;
+        }
+        .projection-question-title {
+            font-size: 1.6rem;
+        }
+        .projection-option-card {
+            font-size: 1.2rem;
+        }
     }
 </style>
 """,
@@ -80,7 +157,6 @@ def init_db():
 
 init_db()
 
-# Label Formatting Schemes
 LABEL_FORMATS = {
     "Capital Letters (A, B, C, D)": ["A", "B", "C", "D"],
     "Small Letters (a, b, c, d)": ["a", "b", "c", "d"],
@@ -286,8 +362,8 @@ elif st.session_state.user_role == "teacher":
     tab_class_db, tab_q_db, tab_portal, tab_analytics = st.tabs([
         "🏫 Classroom & Group DB Manager",
         "📚 Topic-Wise Question Bank DB",
-        "📲 Live Quiz Controller",
-        "📺 Live Analytics & Leaderboard",
+        "📺 Live Classroom Projection Display",
+        "📊 Live Analytics & Leaderboard",
     ])
 
     # --- TAB 1: CLASSROOM DB ---
@@ -302,7 +378,7 @@ elif st.session_state.user_role == "teacher":
                 if st.button("Create Classroom ➕") and new_class:
                     try:
                         conn.execute(
-                            "INSERT INTO classrooms (class_name) VALUES (?)", (new_class,)
+                            "INSERT INTO classrooms (class_name) VALUES (?)" , (new_class,)
                         )
                         conn.commit()
                         st.success(f"Classroom '{new_class}' created!")
@@ -383,7 +459,6 @@ elif st.session_state.user_role == "teacher":
                 q_topic = st.text_input("Topic Name:", value="Linear Algebra")
                 q_text = st.text_area("Question Text:", value=r"Eigenvalues of matrix $A$ are:")
 
-                # UPDATE 2: Custom Option Label Format
                 fmt_choice = st.selectbox(
                     "Select Option Labeling Style:",
                     list(LABEL_FORMATS.keys())
@@ -423,7 +498,6 @@ elif st.session_state.user_role == "teacher":
                 q_bank_df = pd.read_sql("SELECT * FROM question_bank", conn)
 
                 if not q_bank_df.empty:
-                    # UPDATE 3: Filter by Topic
                     all_topics = ["All Topics"] + q_bank_df["topic"].unique().tolist()
                     selected_topic = st.selectbox("Filter Question Bank by Topic:", all_topics)
 
@@ -434,7 +508,6 @@ elif st.session_state.user_role == "teacher":
 
                     st.markdown(f"**Found {len(filtered_qs)} Questions**")
 
-                    # UPDATE 1: Add Checkboxes via Data Editor
                     filtered_qs.insert(0, "Select", False)
                     
                     edited_df = st.data_editor(
@@ -466,6 +539,7 @@ elif st.session_state.user_role == "teacher":
                                 selected_rows = q_bank_df[q_bank_df["id"].isin(selected_ids)]
                                 for _, row in selected_rows.iterrows():
                                     st.session_state.quiz_questions.append({
+                                        "topic": row["topic"],
                                         "question": row["question"],
                                         "option_labels": json.loads(row["option_labels"]),
                                         "options": json.loads(row["options"]),
@@ -480,6 +554,7 @@ elif st.session_state.user_role == "teacher":
                             st.session_state.quiz_questions = []
                             for _, row in filtered_qs.iterrows():
                                 st.session_state.quiz_questions.append({
+                                    "topic": row["topic"],
                                     "question": row["question"],
                                     "option_labels": json.loads(row["option_labels"]),
                                     "options": json.loads(row["options"]),
@@ -492,29 +567,56 @@ elif st.session_state.user_role == "teacher":
                 else:
                     st.info("No questions stored in database yet.")
 
-    # --- TAB 3: CONTROLLER ---
+    # --- TAB 3: LIVE CLASSROOM PROJECTION DISPLAY ---
     with tab_portal:
-        st.header("🎮 Live Quiz Controller")
+        st.header("📺 Live Classroom Projection Display")
+        
         if not st.session_state.quiz_questions:
-            st.warning("Import questions from the Question Bank tab.")
+            st.warning("No questions loaded. Import questions from the Question Bank tab.")
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
-            st.markdown(
-                f"### Active Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}"
-            )
-            st.markdown(f"**{curr_q['question']}**")
+            q_topic = curr_q.get("topic", "General")
+            
+            # Classroom-Ready Single Display Box HTML Construction
+            options_html = ""
+            for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
+                options_html += f"""
+                <div class="projection-option-card">
+                    <span class="projection-option-label">{label}</span>
+                    <span>{opt_text}</span>
+                </div>
+                """
 
-            col_nav1, col_nav2, col_nav3 = st.columns(3)
+            projection_box_html = f"""
+            <div class="classroom-projection-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span class="projection-topic-badge">📌 {q_topic}</span>
+                    <span style="font-size: 1.3rem; font-weight: bold; color: #94A3B8;">
+                        Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}
+                    </span>
+                </div>
+                <div class="projection-question-title">{curr_q['question']}</div>
+                <div class="projection-options-grid">
+                    {options_html}
+                </div>
+            </div>
+            """
+
+            # Render Projection Display Box
+            st.markdown(projection_box_html, unsafe_allow_html=True)
+
+            # Controller Toolbar
+            col_nav1, col_nav2, col_nav3 = st.columns([1, 1, 1])
             with col_nav1:
-                if st.button("⬅️ Previous Question") and st.session_state.current_q_idx > 0:
+                if st.button("⬅️ Previous Question", use_container_width=True) and st.session_state.current_q_idx > 0:
                     st.session_state.current_q_idx -= 1
                     st.rerun()
             with col_nav2:
-                if st.button("Next Question ➡️") and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
+                if st.button("Next Question ➡️", use_container_width=True) and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
                     st.session_state.current_q_idx += 1
                     st.rerun()
             with col_nav3:
-                if st.button("🏆 End Quiz"):
+                if st.button("🏆 End Quiz Session", use_container_width=True):
                     st.session_state.quiz_ended = True
                     st.rerun()
 
