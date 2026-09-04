@@ -476,10 +476,9 @@ elif st.session_state.user_role == "teacher":
                             with col_m1:
                                 if st.button("Save Selected to Group 💾", use_container_width=True):
                                     if manual_grp_name and selected_rolls:
+                                        placeholders = ",".join(["?"] * len(selected_rolls))
                                         conn.execute(
-                                            "DELETE FROM student_groups WHERE class_id = ? AND (group_name = ? OR roll_no IN ({}))".format(
-                                                ",".join(["?"] * len(selected_rolls))
-                                            ),
+                                            f"DELETE FROM student_groups WHERE class_id = ? AND (group_name = ? OR roll_no IN ({placeholders}))",
                                             [st.session_state.active_class_id, manual_grp_name] + selected_rolls,
                                         )
                                         for r_no in selected_rolls:
@@ -667,207 +666,123 @@ elif st.session_state.user_role == "teacher":
                 else:
                     filtered_doc_df = doc_bank_df.copy()
 
-                filtered_doc_df.insert(0, "Select", False)
+                st.markdown(f"**Found {len(filtered_doc_df)} Document Questions**")
+                st.dataframe(filtered_doc_df[["id", "topic", "title", "file_name", "answer_key"]], use_container_width=True)
 
-                edited_doc_df = st.data_editor(
-                    filtered_doc_df[["Select", "id", "topic", "title", "file_name"]],
-                    column_config={
-                        "Select": st.column_config.CheckboxColumn("Include in Quiz?", default=False),
-                        "id": "id",
-                        "topic": "Topic",
-                        "title": "Title",
-                        "file_name": "File Name",
-                    },
-                    disabled=["id", "topic", "title", "file_name"],
-                    hide_index=True,
-                    use_container_width=True,
-                    height=280
-                )
-
-                selected_doc_ids = edited_doc_df[edited_doc_df["Select"] == True]["id"].tolist()
-
-                if st.button("Load Selected Questions to Live Projection 🚀", use_container_width=True):
-                    if not selected_doc_ids:
-                        st.warning("Please select at least one document question checkbox.")
-                    else:
-                        with get_db_connection() as conn:
-                            query = f"SELECT * FROM pdf_jpg_questions WHERE id IN ({','.join(map(str, selected_doc_ids))})"
-                            loaded_docs = pd.read_sql(query, conn)
-                        
-                        st.session_state.doc_questions = loaded_docs.to_dict(orient="records")
+                if st.button("Load All Filtered Documents to Projection 🚀"):
+                    with get_db_connection() as conn:
+                        placeholders = ",".join(["?"] * len(filtered_doc_df))
+                        full_docs = pd.read_sql(
+                            f"SELECT * FROM pdf_jpg_questions WHERE id IN ({placeholders})",
+                            conn,
+                            params=filtered_doc_df["id"].tolist(),
+                        )
+                        st.session_state.doc_questions = full_docs.to_dict("records")
                         st.session_state.doc_current_idx = 0
                         st.session_state.doc_show_answer = False
-                        st.success(f"Loaded {len(loaded_docs)} document/image questions for Live Quiz Projection!")
+                        st.success("Loaded document questions into projection view!")
             else:
-                st.info("No uploaded questions found in the document bank.")
+                st.info("No uploaded document or image questions in the database.")
 
-    # --- TAB 4: LIVE CLASSROOM PROJECTION DISPLAY ---
+    # --- TAB 4: LIVE CLASSROOM PROJECTION ---
     with tab_portal:
-        st.header("📺 Live Classroom Projection Display")
-        
+        st.header("📺 Live Projection Portal")
         if not st.session_state.quiz_questions:
-            st.warning("No questions loaded. Import questions from the Question Bank tab.")
+            st.warning("No active quiz questions loaded. Import from Question Bank first.")
         else:
             curr_q = st.session_state.quiz_questions[st.session_state.current_q_idx]
-            q_topic = curr_q.get("topic", "General")
-            correct_idx = curr_q.get("correct_idx", 0)
             
-            with st.container(border=True):
-                col_badge, col_count = st.columns([1, 1])
-                with col_badge:
-                    st.markdown(f"#### 📌 `{q_topic.upper()}`")
-                with col_count:
-                    st.markdown(f"<div style='text-align: right; color: #94A3B8; font-weight: bold; font-size: 1.2rem;'>Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}</div>", unsafe_allow_html=True)
+            st.markdown(f"### Question {st.session_state.current_q_idx + 1} / {len(st.session_state.quiz_questions)}")
+            st.markdown(f"<div class='question-box'><h2>{curr_q['question']}</h2></div>", unsafe_allow_html=True)
 
-                st.markdown("---")
-                st.write(f"# {curr_q['question']}")
-                st.markdown("---")
+            cols = st.columns(2)
+            for idx, opt in enumerate(curr_q["options"]):
+                lbl = curr_q["option_labels"][idx]
+                with cols[idx % 2]:
+                    st.markdown(
+                        f"""
+                        <div class='option-card-wrapper'>
+                            <h4><b>{lbl}:</b> {opt}</h4>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-                col1, col2 = st.columns(2)
-                for idx, (label, opt_text) in enumerate(zip(curr_q["option_labels"], curr_q["options"])):
-                    target_col = col1 if idx % 2 == 0 else col2
-                    is_correct = (idx == correct_idx) and st.session_state.show_correct_answer
-                    
-                    with target_col:
-                        if is_correct:
-                            st.markdown(
-                                f"""
-                                <div style="
-                                    background-color: #064E3B;
-                                    border: 3px solid #059669;
-                                    border-radius: 12px;
-                                    padding: 15px 20px;
-                                    margin-bottom: 15px;
-                                    box-shadow: 0 0 15px rgba(5, 150, 105, 0.4);
-                                ">
-                                    <h3 style="margin: 0; color: #34D399;">{label} (Correct Answer ✅)</h3>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-                            st.write(f"## {opt_text}")
-                        else:
-                            with st.container(border=True):
-                                st.write(f"### **{label}**")
-                                st.write(f"## {opt_text}")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            col_nav1, col_nav2, col_nav3, col_nav4 = st.columns([1, 1.2, 1, 1])
-            
-            with col_nav1:
-                if st.button("⬅️ Previous", use_container_width=True) and st.session_state.current_q_idx > 0:
+            col_p1, col_p2, col_p3 = st.columns(3)
+            with col_p1:
+                if st.button("⬅️ Previous Question", disabled=(st.session_state.current_q_idx == 0)):
                     st.session_state.current_q_idx -= 1
                     st.session_state.show_correct_answer = False
                     st.rerun()
-
-            with col_nav2:
-                btn_label = "🙈 Hide Correct Answer" if st.session_state.show_correct_answer else "👁️ Reveal Correct Answer"
-                if st.button(btn_label, use_container_width=True):
+            with col_p2:
+                if st.button("Show/Hide Answer Key 👁️"):
                     st.session_state.show_correct_answer = not st.session_state.show_correct_answer
-                    st.rerun()
-
-            with col_nav3:
-                if st.button("Next ➡️", use_container_width=True) and st.session_state.current_q_idx < len(st.session_state.quiz_questions) - 1:
+            with col_p3:
+                if st.button("Next Question ➡️", disabled=(st.session_state.current_q_idx == len(st.session_state.quiz_questions) - 1)):
                     st.session_state.current_q_idx += 1
                     st.session_state.show_correct_answer = False
                     st.rerun()
 
-            with col_nav4:
-                if st.button("🏆 End Quiz", use_container_width=True):
-                    st.session_state.quiz_ended = True
-                    st.rerun()
+            if st.session_state.show_correct_answer:
+                c_idx = curr_q["correct_idx"]
+                st.success(f"Correct Answer: **{curr_q['option_labels'][c_idx]} - {curr_q['options'][c_idx]}**")
 
-    # --- TAB 5: LIVE DOCUMENT / IMAGE QUIZ PROJECTION ---
+    # --- TAB 5: DOCUMENT PROJECTION ---
     with tab_doc_portal:
-        st.header("🖼️ Live Document / Image Quiz Projection Display")
-
+        st.header("🖼️ Live Document/Image Quiz Projection")
         if not st.session_state.doc_questions:
-            st.warning("No Document/Image questions loaded. Please select and load them from '📄 Upload & Manage Doc/Image Questions' tab.")
+            st.info("No document questions currently active. Select and load from Document Bank tab.")
         else:
             curr_doc = st.session_state.doc_questions[st.session_state.doc_current_idx]
-            
-            with st.container(border=True):
-                col_d_badge, col_d_count = st.columns([1, 1])
-                with col_d_badge:
-                    st.markdown(f"#### 📌 `{curr_doc['topic'].upper()}` - {curr_doc['title']}")
-                with col_d_count:
-                    st.markdown(
-                        f"<div style='text-align: right; color: #94A3B8; font-weight: bold; font-size: 1.2rem;'>"
-                        f"Question {st.session_state.doc_current_idx + 1} of {len(st.session_state.doc_questions)}</div>",
-                        unsafe_allow_html=True
-                    )
+            st.subheader(f"Document Question {st.session_state.doc_current_idx + 1} of {len(st.session_state.doc_questions)}")
+            st.write(f"**Title:** {curr_doc['title']} | **Topic:** {curr_doc['topic']}")
 
-                st.markdown("---")
+            file_bytes = curr_doc["file_bytes"]
+            file_type = curr_doc["file_type"]
 
-                file_bytes = curr_doc["file_bytes"]
-                file_type = curr_doc["file_type"]
+            if "image" in file_type:
+                st.image(file_bytes, use_column_width=True)
+            elif "pdf" in file_type:
+                base64_pdf = base64.b64encode(file_bytes).decode("utf-8")
+                pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+                st.markdown(pdf_display, unsafe_allow_html=True)
 
-                if "pdf" in file_type.lower():
-                    base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
-                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
-                    st.markdown(pdf_display, unsafe_allow_html=True)
-                else:
-                    st.image(file_bytes, use_container_width=True)
-
-                st.markdown("---")
-
-                if st.session_state.doc_show_answer:
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background-color: #064E3B;
-                            border: 3px solid #059669;
-                            border-radius: 12px;
-                            padding: 20px;
-                            margin-top: 10px;
-                            box-shadow: 0 0 15px rgba(5, 150, 105, 0.4);
-                        ">
-                            <h3 style="margin: 0; color: #34D399;">✅ Correct Solution / Answer Key:</h3>
-                            <h2 style="margin-top: 5px; color: #FFFFFF;">{curr_doc['answer_key']}</h2>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            col_d_nav1, col_d_nav2, col_d_nav3 = st.columns([1, 1.2, 1])
-
-            with col_d_nav1:
-                if st.button("⬅️ Previous Doc Question", use_container_width=True) and st.session_state.doc_current_idx > 0:
+            col_dp1, col_dp2, col_dp3 = st.columns(3)
+            with col_dp1:
+                if st.button("⬅️ Previous Doc", disabled=(st.session_state.doc_current_idx == 0)):
                     st.session_state.doc_current_idx -= 1
                     st.session_state.doc_show_answer = False
                     st.rerun()
-
-            with col_d_nav2:
-                doc_btn_label = "🙈 Hide Answer Key" if st.session_state.doc_show_answer else "👁️ Reveal Answer Key"
-                if st.button(doc_btn_label, use_container_width=True):
+            with col_dp2:
+                if st.button("Toggle Solution / Answer Key 🔑"):
                     st.session_state.doc_show_answer = not st.session_state.doc_show_answer
-                    st.rerun()
-
-            with col_d_nav3:
-                if st.button("Next Doc Question ➡️", use_container_width=True) and st.session_state.doc_current_idx < len(st.session_state.doc_questions) - 1:
+            with col_dp3:
+                if st.button("Next Doc ➡️", disabled=(st.session_state.doc_current_idx == len(st.session_state.doc_questions) - 1)):
                     st.session_state.doc_current_idx += 1
                     st.session_state.doc_show_answer = False
                     st.rerun()
 
-    # --- TAB 6: ANALYTICS ---
+            if st.session_state.doc_show_answer:
+                st.info(f"**Answer Key:** {curr_doc['answer_key']}")
+
+    # --- TAB 6: ANALYTICS & LEADERBOARD ---
     with tab_analytics:
-        st.header("📊 Live Poll Analytics")
-        df_resp = pd.DataFrame(st.session_state.responses)
-        if not df_resp.empty:
-            df_curr = df_resp[df_resp["Q_Idx"] == st.session_state.current_q_idx]
-            if not df_curr.empty:
-                fig = px.histogram(
-                    df_curr,
-                    x="Group",
-                    color="Label",
-                    barmode="group",
-                    template="plotly_dark",
-                )
+        st.header("📊 Live Analytics & Group Leaderboard")
+        if not st.session_state.responses:
+            st.warning("No student response data available for current session yet.")
+        else:
+            responses_df = pd.DataFrame(st.session_state.responses)
+            
+            st.subheader("Response Distribution (Current Question)")
+            curr_responses = responses_df[responses_df["Q_Idx"] == st.session_state.current_q_idx]
+            
+            if not curr_responses.empty:
+                chart_df = curr_responses.groupby(["Group", "Label"]).size().reset_index(name="Count")
+                fig = px.bar(chart_df, x="Group", y="Count", color="Label", barmode="group", title="Responses by Group")
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("No responses for this question yet.")
-        else:
-            st.info("No responses recorded yet.")
+                st.info("No submissions yet for the current question.")
+
+            st.markdown("---")
+            st.subheader("Raw Submission Data")
+            st.dataframe(responses_df, use_container_width=True)
