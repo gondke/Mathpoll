@@ -25,39 +25,35 @@ st.markdown(
         color: #FFFFFF; 
     }
     
-    /* ENLARGED PROJECTION BOX FOR BIG-SCREEN DISPLAY */
-    div[data-testid="stVerticalBlock"] > div.projection-container {
+    /* ENLARGED PROJECTION CONTAINER FOR BIG SCREEN */
+    .projection-box {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);
         border: 4px solid #818CF8;
         border-radius: 20px;
-        padding: 40px 50px;
-        margin-bottom: 30px;
-        box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.6);
+        padding: 30px 40px;
+        margin-bottom: 25px;
+        box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.5);
     }
 
-    /* GLOBAL KATEX TYPOGRAPHY SCALING (FOR PROJECTOR DISPLAY) */
+    /* GLOBAL KATEX TYPOGRAPHY SCALING FOR PROJECTOR DISPLAY */
     .katex-display {
-        font-size: 2.8rem !important;
-        margin: 1.2rem 0 !important;
+        font-size: 3.2rem !important;
+        margin: 1.5rem 0 !important;
         color: #FFFFFF !important;
     }
     
     .katex {
-        font-size: 2.2rem !important;
-        color: #E2E8F0 !important;
+        font-size: 2.6rem !important;
+        color: #F8FAFC !important;
     }
 
-    /* OPTION CARDS CONTAINER */
+    /* OPTION CARDS */
     .option-card {
         background-color: #1E293B;
         border: 3px solid #475569;
         border-radius: 16px;
-        padding: 25px;
-        margin-bottom: 20px;
-        min-height: 140px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
+        padding: 20px;
+        margin-bottom: 15px;
     }
 
     .option-label {
@@ -277,7 +273,7 @@ elif st.session_state.user_role == "student":
 
         st.markdown(f"#### Question {st.session_state.current_q_idx + 1} of {len(st.session_state.quiz_questions)}")
         
-        # Display question in pure textbook math
+        # Display question in pure textbook KaTeX
         st.latex(clean_latex(curr_q['question']))
 
         choices = [
@@ -484,7 +480,7 @@ elif st.session_state.user_role == "teacher":
             with col_q1:
                 st.subheader("1. Add Question to Database")
                 q_topic = st.text_input("Topic Name:", value="Calculus")
-                q_text = st.text_area("Question Text (Raw LaTeX):", value=r"\int_{0}^{\pi} \sin(x) \, dx")
+                q_text = st.text_area("Question Text (Raw LaTeX):", value=r"\text{Evaluate the integral: } \int_{0}^{\pi} \sin(x) \, dx")
 
                 fmt_choice = st.selectbox("Option Style:", list(LABEL_FORMATS.keys()))
                 selected_labels = LABEL_FORMATS[fmt_choice]
@@ -572,7 +568,7 @@ elif st.session_state.user_role == "teacher":
                         st.session_state.doc_show_answer = False
                         st.success("Loaded document questions!")
 
-    # --- TAB 4: LIVE CLASSROOM PROJECTION (FIXED MATH & CARD CONTAINERS) ---
+    # --- TAB 4: LIVE CLASSROOM PROJECTION ---
     with tab_portal:
         st.header("📺 Live Projection Display")
         if not st.session_state.quiz_questions:
@@ -582,31 +578,25 @@ elif st.session_state.user_role == "teacher":
 
             st.markdown(f"### Question {st.session_state.current_q_idx + 1} / {len(st.session_state.quiz_questions)}")
             
-            # 1. ENLARGED QUESTION DISPLAY BOX
-            with st.container():
-                st.markdown("<div class='projection-container'>", unsafe_allow_html=True)
-                st.latex(clean_latex(curr_q['question']))
-                st.markdown("</div>", unsafe_allow_html=True)
+            # QUESTION DISPLAYED IN LARGE KATEX TEXTBOOK TYPESET INSIDE DISPLAY BOX
+            st.markdown("<div class='projection-box'>", unsafe_allow_html=True)
+            st.latex(clean_latex(curr_q['question']))
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # 2. ENLARGED OPTIONS CARDS (STRICTLY CONTAINED)
+            # OPTIONS CONTAINED CLEANLY
             cols = st.columns(2)
             for idx, opt in enumerate(curr_q["options"]):
                 lbl = curr_q["option_labels"][idx]
                 with cols[idx % 2]:
-                    card_container = st.container()
-                    with card_container:
-                        st.markdown(
-                            f"""
-                            <div class='option-card'>
-                                <div class='option-label'>{lbl}</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-                        # Render LaTeX math inside option block cleanly
-                        st.latex(clean_latex(opt))
+                    st.markdown(
+                        f"""
+                        <div class='option-card'>
+                            <div class='option-label'>{lbl}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.latex(clean_latex(opt))
 
             st.markdown("<br><hr>", unsafe_allow_html=True)
 
